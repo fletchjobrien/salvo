@@ -36,6 +36,10 @@
       </div>
       <div class="panel" id="main-panel">
         <button class="big" id="btn-skirmish">SKIRMISH VS AI</button>
+        <div class="fleet-line">
+          <div id="fleet-summary">—</div>
+          <button id="btn-fleet">FLEET CREATOR</button>
+        </div>
         <button class="big" id="btn-host">HOST MULTIPLAYER</button>
         <div class="row">
           <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" />
@@ -47,6 +51,13 @@
               <option value="dusk">Golden Hour</option>
               <option value="day">Clear Morning</option>
               <option value="night">Moonlit Night</option>
+            </select>
+          </label>
+          <label>ENEMY
+            <select id="opt-enemy">
+              <option value="standard">Standard</option>
+              <option value="random">Random</option>
+              <option value="mirror">Mirror</option>
             </select>
           </label>
           <label>AI
@@ -83,6 +94,30 @@
       <div class="howto">
         <b>LMB</b> select · drag box · <b>RMB</b> move / target · <b>F</b> fire salvo · <b>G</b> chaff · <b>B</b> radar · <b>J</b> jammer ·
         <b>WASD</b> pan · <b>Q/E</b> rotate · wheel zoom · <b>1–4</b> ships · <b>`</b> all · <b>SPACE</b> pause
+      </div>
+    </div>
+
+    <div id="editor" class="screen hidden">
+      <div class="ed-wrap">
+        <div class="ed-head">
+          <h2>FLEET CREATOR</h2>
+          <div class="ed-budget"><div class="bar"><i id="ed-budget-bar"></i></div><span id="ed-budget-text"></span></div>
+        </div>
+        <div class="ed-body">
+          <div class="ed-col" id="ed-ships"></div>
+          <div class="ed-col ed-mid">
+            <canvas id="ed-preview" width="200" height="110"></canvas>
+            <div id="ed-fit"></div>
+          </div>
+          <div class="ed-col" id="ed-parts"></div>
+        </div>
+        <div class="ed-foot">
+          <div class="ed-presets"><span>PRESETS</span><span id="ed-presets"></span></div>
+          <div class="ed-btns">
+            <button id="ed-cancel">CANCEL</button>
+            <button class="big" id="ed-done">SAVE FLEET</button>
+          </div>
+        </div>
       </div>
     </div>
 

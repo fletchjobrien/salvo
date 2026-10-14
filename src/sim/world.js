@@ -7,11 +7,11 @@ import {
   WEAPONS,
   WORLD,
   SPEED_LEVELS,
-  FLEETS,
   FORMATION,
   START_DISTANCE,
   SENSORS,
 } from '../config.js';
+import { buildSpec, presetFleet, validateFleet } from '../fleet.js';
 
 const TAU = Math.PI * 2;
 export const wrapAngle = (a) => {
@@ -38,7 +38,8 @@ export function toWorld(ship, lx, lz) {
 }
 
 export function radarRange(ship) {
-  return CLASSES[ship.cls].radar * (ship.dmg && ship.dmg.radar ? 0.6 : 1);
+  const base = ship.spec ? ship.spec.radar : CLASSES[ship.cls].radar;
+  return base * (ship.dmg && ship.dmg.radar ? 0.6 : 1);
 }
 
 // Effective range at which radar ship `f` sees ship `e`.
@@ -78,7 +79,8 @@ export function computeSensors(ships, side, time = 0) {
         break;
       }
       if (emitting(e)) {
-        const r = e.jammer ? SENSORS.jamEsm : radarRange(e) * SENSORS.esmFactor;
+        const ear = f.spec ? f.spec.esm : 1;
+        const r = (e.jammer ? SENSORS.jamEsm : radarRange(e) * SENSORS.esmFactor) * ear;
         if (d < r) heard = Math.min(heard, d);
       }
     }
@@ -111,18 +113,22 @@ export class World {
     };
   }
 
-  static createScenario() {
+  // fleets: { blue, red } designs from src/fleet.js (default: standard preset)
+  static createScenario(fleets = {}) {
     const w = new World();
     const half = START_DISTANCE / 2;
     const jitter = rand(-0.25, 0.25);
     for (const side of ['blue', 'red']) {
+      const fleet = validateFleet(fleets[side], side) || presetFleet('standard', side);
       const dir = side === 'blue' ? 1 : -1;
       const heading = side === 'blue' ? jitter : Math.PI + jitter;
       const baseX = rand(-600, 600);
       const baseZ = -dir * half;
-      FLEETS[side].ships.forEach((def, i) => {
+      // biggest hull leads the formation
+      const order = { ddg: 0, ffg: 1, fac: 2 };
+      const ships = fleet.ships.slice().sort((a, b) => order[a.cls] - order[b.cls]);
+      ships.forEach((def, i) => {
         const [ox, oz] = FORMATION[i % FORMATION.length];
-        // rotate formation offset by heading
         const s = Math.sin(heading);
         const c = Math.cos(heading);
         const x = baseX + ox * c + oz * s;
@@ -134,13 +140,14 @@ export class World {
   }
 
   spawnShip(side, def, x, z, heading) {
-    const c = CLASSES[def.cls];
+    const c = buildSpec(def.cls, def.modules || []);
     const s = {
       id: this.nextId++,
       side,
       cls: def.cls,
       name: def.name,
-      hull: def.hull,
+      hull: def.hull || `${CLASSES[def.cls].short}-${100 + this.nextId}`,
+      spec: c,
       x,
       z,
       heading,
@@ -274,7 +281,7 @@ export class World {
         break;
       case 'jammer':
         for (const s of ships) {
-          if (s.jammer === !!cmd.on) continue;
+          if (s.jammer === !!cmd.on || (cmd.on && !s.spec.canJam)) continue;
           s.jammer = !!cmd.on;
           this.emit({ t: 'jam', s: s.id, on: s.jammer });
         }
@@ -341,15 +348,19 @@ export class World {
     if (!this.winner) {
       const blueAlive = this.ships.some((s) => s.side === 'blue' && s.alive);
       const redAlive = this.ships.some((s) => s.side === 'red' && s.alive);
-      if (!blueAlive || !redAlive) {
-        this.winner = blueAlive ? 'blue' : redAlive ? 'red' : 'draw';
+      // Neither side can hurt the other any more: call it a draw.
+      const armed = (side) =>
+        this.ships.some((s) => s.side === side && s.alive && (s.ssm > 0 || s.launchQueue.length || (s.spec.gun && !s.dmg.gun)));
+      const stalemate = !armed('blue') && !armed('red') && !this.missiles.some((m) => m.kind === 'ssm') && !this.shells.length;
+      if (!blueAlive || !redAlive || stalemate) {
+        this.winner = stalemate && blueAlive && redAlive ? 'draw' : blueAlive ? 'blue' : redAlive ? 'red' : 'draw';
         this.emit({ t: 'end', winner: this.winner });
       }
     }
   }
 
   stepShip(s, dt) {
-    const c = CLASSES[s.cls];
+    const c = s.spec;
     if (!s.alive) {
       s.sinkT += dt;
       s.speed = Math.max(0, s.speed - dt * 1.5);
@@ -492,7 +503,7 @@ export class World {
     const aimIdle = () => {
       s.gunAim += clamp(wrapAngle(0 - s.gunAim), -dt, dt);
     };
-    if (s.dmg.gun) return aimIdle();
+    if (s.dmg.gun || !c.gun) return aimIdle();
     const vis = this.visible[s.side];
     let target = null;
     const inRange = (t) => t && t.alive && vis.has(t.id) && Math.hypot(t.x - s.x, t.z - s.z) < c.gun.range;
@@ -863,6 +874,7 @@ export class World {
         cls: s.cls,
         name: s.name,
         hull: s.hull,
+        modules: s.spec.modules,
         x: s.x,
         z: s.z,
         heading: s.heading,

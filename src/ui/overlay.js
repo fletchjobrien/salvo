@@ -69,7 +69,7 @@ export class Overlay {
       const s = g.shipById(g.selected.values().next().value);
       if (s && s.alive) {
         if (s.ssm > 0) this.groundCircle(s.x, s.z, WEAPONS.ssm.range, 'rgba(255,190,90,0.35)', [2, 6]);
-        this.groundCircle(s.x, s.z, CLASSES[s.cls].gun.range, 'rgba(98,216,255,0.28)', [6, 6]);
+        if (s.spec.gun) this.groundCircle(s.x, s.z, s.spec.gun.range, 'rgba(98,216,255,0.28)', [6, 6]);
         this.groundCircle(s.x, s.z, radarRange(s), 'rgba(140,255,170,0.14)', [1, 9]);
       }
     }
@@ -269,52 +269,24 @@ export class Overlay {
     this.drawMinimap(g);
   }
 
-  // Passive (ESM) contacts: bearing strobes from our nearest ship, a pulsing
-  // uncertainty zone and a dashed "?" symbol at the estimated position.
+  // Passive (ESM) contacts: a small dashed "?" marker at the estimated
+  // position. The uncertainty circle appears only when you point at it.
   drawESM(g) {
     if (!g.esm || !g.esm.size) return;
     const ctx = this.ctx;
-    const now = performance.now() / 1000;
-    const own = g.state.ships.filter((s) => s.side === g.side && s.alive);
     for (const [id, c] of g.esm) {
       const s = g.shipById(id);
       if (!s) continue;
       const col = c.jam ? JAM : ESM;
-      let from = null;
-      let best = Infinity;
-      for (const o of own) {
-        const d = Math.hypot(o.x - c.x, o.z - c.z);
-        if (d < best) {
-          best = d;
-          from = o;
-        }
-      }
-      // bearing strobe(s)
-      if (from) {
-        const n = c.jam ? 3 : 1;
-        for (let i = 0; i < n; i++) {
-          const jit = c.jam ? (Math.random() - 0.5) * 0.05 : 0;
-          const a = Math.atan2(c.x - from.x, c.z - from.z) + jit;
-          const L = best + c.err;
-          ctx.strokeStyle = col;
-          ctx.globalAlpha = c.jam ? 0.25 + Math.random() * 0.3 : 0.32 + 0.12 * Math.sin(now * 3);
-          ctx.lineWidth = 1.2;
-          ctx.setLineDash(c.jam ? [2, 3] : [8, 6]);
-          this.groundLine(from.x, from.z, from.x + Math.sin(a) * L, from.z + Math.cos(a) * L);
-        }
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
-      }
-      // uncertainty zone
-      const pulse = 0.85 + 0.15 * Math.sin(now * 2.5 + id);
-      this.groundCircle(c.x, c.z, c.err * pulse, c.jam ? 'rgba(185,140,255,0.55)' : 'rgba(255,179,71,0.55)', [4, 5]);
+      const hover = g.hoverId === id;
+      if (hover) this.groundCircle(c.x, c.z, c.err, c.jam ? 'rgba(185,140,255,0.45)' : 'rgba(255,179,71,0.45)', [3, 5]);
       const p = this.project(c.x, 8, c.z);
       if (!p.ok) continue;
-      // dashed hostile diamond with a "?"
-      const r = 9;
+      const r = 7;
       ctx.strokeStyle = col;
-      ctx.lineWidth = g.hoverId === id ? 2.5 : 1.6;
-      ctx.setLineDash([3, 3]);
+      ctx.globalAlpha = hover ? 1 : 0.8;
+      ctx.lineWidth = hover ? 2 : 1.2;
+      ctx.setLineDash([2, 2]);
       ctx.beginPath();
       ctx.moveTo(p.x - r, p.y);
       ctx.lineTo(p.x, p.y - r);
@@ -323,24 +295,14 @@ export class Overlay {
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = `15px ${FONT}`;
+      ctx.font = `14px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = col;
-      ctx.fillText('?', p.x, p.y + 5);
-      const label = c.jam ? 'JAMMER' : `ESM ${CLASSES[s.cls].short}`;
-      const w = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(p.x - w / 2 - 3, p.y - 26, w + 6, 14);
-      ctx.fillStyle = col;
-      ctx.fillText(label, p.x, p.y - 15);
+      ctx.fillText('?', p.x, p.y + 4);
+      if (hover || g.rig.dist < 3000) ctx.fillText(c.jam ? 'JAMMING' : `${CLASSES[s.cls].short}?`, p.x, p.y - 12);
       ctx.textAlign = 'left';
-      if (g.fireMode && g.hoverId === id) {
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(now * 4);
-        this.brackets(0, 0, 16, HOSTILE);
-        ctx.restore();
-      }
+      ctx.globalAlpha = 1;
+      if (g.fireMode && hover) this.brackets(p.x, p.y, 14, HOSTILE);
     }
   }
 
@@ -517,7 +479,7 @@ export class Overlay {
     }
     ctx.stroke();
 
-    // radar coverage (silent ships show only a dashed edge)
+    // radar coverage: filled when radiating, dashed edge when silent
     for (const s of g.state.ships) {
       if (s.side !== g.side || !s.alive) continue;
       const [px, py] = P(s.x, s.z);
@@ -525,83 +487,41 @@ export class Overlay {
       ctx.arc(px, py, radarRange(s) * v.scale, 0, Math.PI * 2);
       if (s.radar === false) {
         ctx.setLineDash([2, 4]);
-        ctx.strokeStyle = 'rgba(143,163,173,0.35)';
+        ctx.strokeStyle = 'rgba(143,163,173,0.3)';
         ctx.stroke();
         ctx.setLineDash([]);
       } else {
-        ctx.fillStyle = 'rgba(80,255,140,0.045)';
+        ctx.fillStyle = 'rgba(98,216,255,0.04)';
         ctx.fill();
-      }
-      if (s.jammer) {
-        const t = (performance.now() / 1000) % 1.3;
-        ctx.strokeStyle = `rgba(185,140,255,${0.6 * (1 - t / 1.3)})`;
-        ctx.beginPath();
-        ctx.arc(px, py, 4 + t * 26, 0, Math.PI * 2);
-        ctx.stroke();
       }
     }
 
-    // PPI sweep from the fleet centre with a phosphor afterglow
+    // one quiet sweep line from the fleet centre
     const own = g.state.ships.filter((s) => s.side === g.side && s.alive);
-    const ocx = own.length ? own.reduce((a, s) => a + s.x, 0) / own.length : v.cx;
-    const ocz = own.length ? own.reduce((a, s) => a + s.z, 0) / own.length : v.cz;
-    const [sx, sy] = P(ocx, ocz);
-    const sweep = ((performance.now() / 1000) * 1.6) % (Math.PI * 2);
-    const anyRadar = own.some((s) => s.radar !== false);
-    if (anyRadar) {
-      for (let i = 0; i < 14; i++) {
-        const a0 = sweep - (i + 1) * 0.06;
-        ctx.fillStyle = `rgba(110,255,160,${0.16 * Math.pow(1 - i / 14, 2)})`;
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.arc(sx, sy, W * 1.5, a0, a0 + 0.062);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.strokeStyle = 'rgba(160,255,190,0.55)';
+    if (own.some((s) => s.radar !== false)) {
+      const [sx, sy] = P(own.reduce((a, s) => a + s.x, 0) / own.length, own.reduce((a, s) => a + s.z, 0) / own.length);
+      const sweep = ((performance.now() / 1000) * 1.2) % (Math.PI * 2);
+      ctx.strokeStyle = 'rgba(140,255,170,0.14)';
       ctx.beginPath();
       ctx.moveTo(sx, sy);
       ctx.lineTo(sx + Math.cos(sweep) * W * 1.5, sy + Math.sin(sweep) * W * 1.5);
       ctx.stroke();
     }
-    // brightness of a blip by how recently the sweep passed it
-    const glow = (px, py) => {
-      if (!anyRadar) return 0.75;
-      let d = sweep - Math.atan2(py - sy, px - sx);
-      d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      return 0.3 + 0.7 * Math.exp(-d * 1.1);
-    };
 
-    // ESM strobes: bearing lines across the scope
-    for (const [id, c] of g.esm || []) {
+    // ESM contacts: small hollow markers
+    for (const [, c] of g.esm || []) {
       const [ex, ey] = P(c.x, c.z);
-      const a = Math.atan2(ey - sy, ex - sx);
-      const n = c.jam ? 4 : 1;
-      for (let i = 0; i < n; i++) {
-        const j = c.jam ? (Math.random() - 0.5) * 0.12 : 0;
-        ctx.strokeStyle = c.jam ? `rgba(185,140,255,${0.25 + Math.random() * 0.4})` : 'rgba(255,179,71,0.55)';
-        ctx.setLineDash(c.jam ? [] : [3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(sx + Math.cos(a + j) * W * 1.5, sy + Math.sin(a + j) * W * 1.5);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
       ctx.strokeStyle = c.jam ? JAM : ESM;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(ex, ey, Math.max(3, c.err * v.scale), 0, Math.PI * 2);
+      ctx.arc(ex, ey, 3, 0, Math.PI * 2);
       ctx.stroke();
-      if (g.hoverId === id) {
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.fillRect(ex - 2, ey - 2, 4, 4);
-      }
     }
 
     // missiles
     for (const m of g.state.missiles) {
       if (m.side !== g.side && !g.missileVisible(m)) continue;
       const [px, py] = P(m.x, m.z);
-      ctx.globalAlpha = m.side === g.side ? 1 : glow(px, py);
       ctx.fillStyle = m.side === g.side ? FRIEND : HOSTILE;
       ctx.fillRect(px - 1, py - 1, 2, 2);
     }
@@ -612,7 +532,6 @@ export class Overlay {
       if (!friendly && !g.visible.has(s.id)) continue;
       if (!s.alive) continue;
       const [px, py] = P(s.x, s.z);
-      ctx.globalAlpha = friendly ? 1 : glow(px, py);
       ctx.strokeStyle = friendly ? FRIEND : HOSTILE;
       ctx.fillStyle = ctx.strokeStyle;
       ctx.lineWidth = g.selected.has(s.id) ? 2 : 1.2;

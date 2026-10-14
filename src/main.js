@@ -13,6 +13,8 @@ import { Overlay } from './ui/overlay.js';
 import { Hud } from './ui/hud.js';
 import { Audio } from './audio/audio.js';
 import { Net, Mirror, createRoomCode } from './net/net.js';
+import { FleetEditor } from './ui/fleetEditor.js';
+import { BUDGET, fleetCost, presetFleet, randomFleet, validateFleet } from './fleet.js';
 
 const $ = (id) => document.getElementById(id);
 const SNAP_RATE = 1 / 15;
@@ -50,7 +52,11 @@ class Game {
     this.fill = new THREE.DirectionalLight(0xffffff, 1);
     this.scene.add(this.sun, this.sun.target, this.hemi, this.fill);
 
-    this.prefs = { env: 'dusk', diff: '1', pixel: '0', filter: 'soft', vol: 0.8, voice: true, ...loadPrefs() };
+    this.prefs = { env: 'dusk', diff: '1', pixel: '0', filter: 'soft', vol: 0.8, voice: true, enemy: 'standard', ...loadPrefs() };
+    this.prefs.fleet = validateFleet(this.prefs.fleet, 'blue') || presetFleet('standard', 'blue');
+    this.editor = new FleetEditor({
+      onClick: (ok) => (ok ? this.audio.blip(1500, 0.03, 'square', 0.05) : this.audio.deny()),
+    });
     this.applyEnv(this.prefs.env);
     this.r.setPixelScale(+this.prefs.pixel);
     this.r.setFilter(this.prefs.filter);
@@ -150,9 +156,49 @@ class Game {
     this.side = 'blue';
     this.resetView();
     this.applyEnv(this.prefs.env);
-    this.world = World.createScenario();
+    this.world = World.createScenario({ blue: this.prefs.fleet, red: this.enemyFleet() });
     this.ais = [new AIController(this.world, 'red', +this.prefs.diff)];
     this.enterBattle();
+  }
+
+  enemyFleet() {
+    const e = this.prefs.enemy;
+    if (e === 'random') return randomFleet('red');
+    // mirror: your own design, with Red Pact names
+    if (e === 'mirror') return validateFleet({ ships: this.prefs.fleet.ships.map((d) => ({ cls: d.cls, modules: d.modules })) }, 'red');
+    return presetFleet('standard', 'red');
+  }
+
+  // ------------------------------------------------------------ fleet creator
+  openEditor() {
+    this.audio.unlock();
+    $('menu').classList.add('hidden');
+    this.editor.show(this.prefs.fleet);
+  }
+
+  closeEditor(save) {
+    if (save) {
+      const f = validateFleet(this.editor.fleet, 'blue');
+      if (!f) {
+        this.audio.deny();
+        return;
+      }
+      this.prefs.fleet = f;
+      savePrefs(this.prefs);
+      this.audio.order();
+    }
+    this.editor.hide();
+    $('menu').classList.remove('hidden');
+    this.updateFleetSummary();
+  }
+
+  updateFleetSummary() {
+    const f = this.prefs.fleet;
+    const counts = {};
+    for (const d of f.ships) counts[d.cls] = (counts[d.cls] || 0) + 1;
+    const names = { ddg: 'DDG', ffg: 'FFG', fac: 'FAC' };
+    const parts = Object.entries(counts).map(([c, n]) => `${n}×${names[c]}`);
+    $('fleet-summary').innerHTML = `YOUR FLEET: <b>${parts.join(' ')}</b><br>${fleetCost(f)} / ${BUDGET} pts`;
   }
 
   enterBattle() {
@@ -193,15 +239,12 @@ class Game {
 
   onHostMessage(m) {
     if (m.t === 'peer' && m.joined && this.mode !== 'host') {
-      this.mode = 'host';
-      this.side = 'blue';
-      this.resetView();
-      this.applyEnv(this.prefs.env);
-      this.world = World.createScenario();
-      this.ais = [];
-      this.net.send({ t: 'init', env: this.prefs.env, init: this.world.initPayload() });
-      this.enterBattle();
-      this.hud.message('Opponent connected. Weapons free.', 'good');
+      // The guest sends its fleet right after joining; fall back to standard.
+      clearTimeout(this.fleetWait);
+      this.fleetWait = setTimeout(() => this.startHosted(null), 4000);
+    } else if (m.t === 'fleet' && this.mode !== 'host') {
+      clearTimeout(this.fleetWait);
+      this.startHosted(validateFleet(m.fleet, 'red'));
     } else if (m.t === 'peer' && !m.joined && this.mode === 'host') {
       this.hud.message('Opponent disconnected — AI has taken command of the Red Pact.', 'warn');
       this.ais = [new AIController(this.world, 'red', +this.prefs.diff)];
@@ -211,6 +254,19 @@ class Game {
     } else if (m.t === 'cmd' && this.mode === 'host' && m.c) {
       this.world.command('red', m.c);
     }
+  }
+
+  startHosted(redFleet) {
+    if (this.mode === 'host' || !this.net) return;
+    this.mode = 'host';
+    this.side = 'blue';
+    this.resetView();
+    this.applyEnv(this.prefs.env);
+    this.world = World.createScenario({ blue: this.prefs.fleet, red: redFleet || presetFleet('standard', 'red') });
+    this.ais = [];
+    this.net.send({ t: 'init', env: this.prefs.env, init: this.world.initPayload() });
+    this.enterBattle();
+    this.hud.message('Opponent connected. Weapons free.', 'good');
   }
 
   async joinGame() {
@@ -226,6 +282,7 @@ class Game {
       this.net.onMessage = (m) => this.onGuestMessage(m);
       this.net.onClose = () => this.onNetClosed();
       await this.net.connect(code, 'guest');
+      this.net.send({ t: 'fleet', fleet: { ships: this.prefs.fleet.ships.map((d) => ({ cls: d.cls, modules: d.modules })) } });
       this.menuMsg('Connected — waiting for the host…');
     } catch (e) {
       this.menuMsg(e.message || 'Could not join');
@@ -386,8 +443,13 @@ class Game {
   }
 
   toggleJammer() {
-    const ships = this.liveSelected().map((id) => this.shipById(id));
-    if (!ships.length) return this.audio.deny();
+    const ships = this.liveSelected()
+      .map((id) => this.shipById(id))
+      .filter((s) => s.spec.canJam);
+    if (!ships.length) {
+      this.hud.message('No jammer fitted on the selected ships.', 'warn');
+      return this.audio.deny();
+    }
     const on = !ships.every((s) => s.jammer);
     this.issue({ type: 'jammer', ships: ships.map((s) => s.id), on });
     this.audio.jamToggle(on);
@@ -497,6 +559,17 @@ class Game {
       savePrefs(p);
     };
     $('btn-skirmish').onclick = () => this.startSkirmish();
+    $('btn-fleet').onclick = () => this.openEditor();
+    $('ed-done').onclick = () => this.closeEditor(true);
+    $('ed-cancel').onclick = () => this.closeEditor(false);
+    $('ed-presets').innerHTML = this.editor.presetsHTML();
+    $('ed-presets').querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => this.editor.preset(b.dataset.preset)));
+    $('opt-enemy').value = p.enemy;
+    $('opt-enemy').onchange = (e) => {
+      p.enemy = e.target.value;
+      savePrefs(p);
+    };
+    this.updateFleetSummary();
     $('btn-host').onclick = () => this.hostGame();
     $('btn-join').onclick = () => this.joinGame();
     $('join-code').onkeydown = (e) => {
@@ -938,6 +1011,7 @@ class Game {
   }
 
   update(dt) {
+    this.editor.frame(dt);
     // camera keys
     const panSpeed = dt * 1.1;
     const K = this.keys;
@@ -1002,7 +1076,7 @@ class Game {
 
     const t = state.time;
     this.view.camPos = this.r.camera.position;
-    this.view.update(state, this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1), this.visible, this.side, this.selected);
+    this.view.update(state, this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1), this.visible, this.side);
     this.fx.listenerPos.copy(this.rig.target);
     this.fx.update(this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1));
     this.rig.shake = this.fx.shake;

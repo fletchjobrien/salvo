@@ -1,7 +1,7 @@
 // Multiplayer transport + guest-side state mirror.
 // Host: runs World, sends {t:'init'} once, then {t:'snap'} ~15 Hz.
 // Guest: sends {t:'cmd'}; renders an interpolated Mirror of the host state.
-import { CLASSES } from '../config.js';
+import { buildSpec } from '../fleet.js';
 import { wrapAngle } from '../sim/world.js';
 
 export async function createRoomCode() {
@@ -84,9 +84,10 @@ export class Mirror {
     this.winner = null;
     this.renderTime = null;
     for (const s of init.ships) {
-      const c = CLASSES[s.cls];
+      const c = buildSpec(s.cls, s.modules || []);
       const ship = {
         ...s,
+        spec: c,
         speed: 0,
         hp: c.hp,
         maxHp: c.hp,

@@ -104,33 +104,14 @@ export const SENSORS = {
   breakLock: 0.22, // chance a jammer breaks a seeker's lock once it acquires
 };
 
-export const FLEETS = {
-  blue: {
-    name: 'Coalition Task Group',
-    ships: [
-      { cls: 'ddg', name: 'Valiant', hull: 'DDG-121' },
-      { cls: 'ffg', name: 'Kestrel', hull: 'FFG-64' },
-      { cls: 'ffg', name: 'Osprey', hull: 'FFG-67' },
-      { cls: 'fac', name: 'Stiletto', hull: 'PGM-9' },
-    ],
-  },
-  red: {
-    name: 'Red Pact Surface Group',
-    ships: [
-      { cls: 'ddg', name: 'Dominion', hull: '711' },
-      { cls: 'ffg', name: 'Ardent', hull: '545' },
-      { cls: 'ffg', name: 'Fury', hull: '548' },
-      { cls: 'fac', name: 'Viper', hull: '903' },
-    ],
-  },
-};
-
 // Starting formation offsets (lateral x, forward z) relative to the flagship.
 export const FORMATION = [
   [0, 0],
   [-260, -120],
   [260, -120],
   [0, 300],
+  [-420, 180],
+  [420, 180],
 ];
 
 export const START_DISTANCE = 6400;

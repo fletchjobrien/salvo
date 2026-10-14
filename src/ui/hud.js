@@ -107,7 +107,7 @@ export class Hud {
       c.bar.style.width = `${hp * 100}%`;
       c.bar.style.background = hp > 0.6 ? '#7dff9a' : hp > 0.3 ? '#ffd166' : '#ff5a4a';
       c.ssm.textContent = `SSM ${s.ssm}`;
-      c.sam.textContent = CLASSES[s.cls].sam ? `SAM ${s.sam}` : '';
+      c.sam.textContent = s.spec && s.spec.sam ? `SAM ${s.sam}` : '';
       c.spd.textContent = `${Math.round(s.speed * KNOTS)}kt`;
       const st = [];
       if (!s.alive) st.push('SINKING');
@@ -138,8 +138,9 @@ export class Hud {
     const chaffReady = sel.some((s) => s.chaff > 0 && !(s.chaffCd > 0));
     const radarOn = sel.every((s) => s.radar !== false);
     const radarMixed = !radarOn && sel.some((s) => s.radar !== false);
-    const jamOn = sel.length > 0 && sel.every((s) => s.jammer);
-    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, radarOn, radarMixed, jamOn].join('|');
+    const jamOn = sel.length > 0 && sel.every((s) => s.jammer || !s.spec.canJam);
+    const canJam = sel.some((s) => s.spec.canJam);
+    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, radarOn, radarMixed, jamOn, canJam].join('|');
     if (key === this.ordersKey) return;
     this.ordersKey = key;
     if (!sel.length) {
@@ -160,7 +161,7 @@ export class Hud {
       <div class="grp"><span class="lbl">SALVO</span>${salvoBtns}</div>
       <div class="grp sensors"><span class="lbl">SENSOR</span>
         <button class="radar ${radarOn ? 'on' : radarMixed ? 'mixed' : 'off'}" data-act="radar" title="Radar active: you see far and SAMs work, but enemy ESM hears you. Silent: hidden, but SAMs are offline.">[B] RADAR ${radarOn ? 'ACTIVE' : radarMixed ? 'MIXED' : 'SILENT'}</button>
-        <button class="jam ${jamOn ? 'on' : ''}" data-act="jam" title="Jammer: shrinks enemy radar range and can spoof missile seekers, but enemy ESM hears it from far away.">[J] JAMMER ${jamOn ? 'ON' : 'OFF'}</button>
+        <button class="jam ${jamOn && canJam ? 'on' : ''}" data-act="jam" ${canJam ? '' : 'disabled'} title="Jammer: shrinks enemy radar range and can spoof missile seekers, but enemy ESM hears it from far away.">[J] JAMMER ${!canJam ? 'NONE' : jamOn ? 'ON' : 'OFF'}</button>
       </div>
       <div class="grp">
         <button class="fire ${g.fireMode ? 'on' : ''}" data-act="fire" ${ssm ? '' : 'disabled'}>[F] FIRE SSM ${ssm}</button>

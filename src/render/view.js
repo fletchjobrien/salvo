@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CLASSES } from '../config.js';
 import { waveHeight } from '../sim/waves.js';
-import { toWorld, radarRange } from '../sim/world.js';
+import { toWorld } from '../sim/world.js';
 import { buildShipModel } from './shipModels.js';
 import { keepAlpha } from './effects.js';
 
@@ -187,60 +187,6 @@ function mulberry(a) {
   };
 }
 
-// A phosphor-green radar sweep laid on the sea: bright leading edge with a
-// fading afterglow behind it, like a PPI scope painted on the water.
-const BEAM_ARC = 0.55;
-function beamGeometry() {
-  const seg = 24;
-  const rings = 12;
-  const pos = [];
-  const uv = [];
-  for (let r = 0; r <= rings; r++) {
-    for (let i = 0; i <= seg; i++) {
-      const a = -BEAM_ARC * (1 - i / seg);
-      const rr = Math.pow(r / rings, 1.3);
-      pos.push(Math.sin(a) * rr, 0, Math.cos(a) * rr);
-      uv.push(i / seg, rr);
-    }
-  }
-  const idx = [];
-  for (let r = 0; r < rings; r++) {
-    for (let i = 0; i < seg; i++) {
-      const a = r * (seg + 1) + i;
-      const b = a + seg + 1;
-      idx.push(a, b, a + 1, a + 1, b, b + 1);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  return g;
-}
-
-function beamMaterial() {
-  return keepAlpha(
-    new THREE.ShaderMaterial({
-      uniforms: { strength: { value: 0.1 }, color: { value: new THREE.Color(0.35, 1.0, 0.55) } },
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */ `
-        uniform float strength; uniform vec3 color; varying vec2 vUv;
-        void main() {
-          float trail = pow(vUv.x, 4.0);                // afterglow behind the edge
-          float edge = smoothstep(0.96, 1.0, vUv.x);    // the bright beam itself
-          float range = smoothstep(0.0, 0.08, vUv.y) * (1.0 - smoothstep(0.85, 1.0, vUv.y));
-          float rings = 0.6 + 0.4 * smoothstep(0.9, 1.0, fract(vUv.y * 6.0));
-          float a = (trail * 0.35 + edge) * range * rings * strength;
-          gl_FragColor = vec4(color, a);
-        }`,
-    }),
-    true,
-  );
-}
-
 export class GameView {
   constructor(scene, effects) {
     this.scene = scene;
@@ -260,7 +206,6 @@ export class GameView {
       v.wake.dispose(this.scene);
     }
     for (const m of this.missiles.values()) this.scene.remove(m.mesh);
-    for (const v of this.ships.values()) if (v.beam) this.scene.remove(v.beam);
     this.ships.clear();
     this.missiles.clear();
     this.pending = [];
@@ -297,7 +242,7 @@ export class GameView {
     return new THREE.Vector3(lx, ly, lz).applyMatrix4(v.model.body.matrixWorld);
   }
 
-  update(state, dt, visibleSet, viewerSide, selected) {
+  update(state, dt, visibleSet, viewerSide) {
     this.time += dt;
     const t = state.time;
     Wake.material().uniforms.time.value = t;
@@ -351,50 +296,13 @@ export class GameView {
       v.model.body.rotation.set(v.pitch, 0, v.roll, 'XYZ');
 
       // turret, radar, recoil
+      v.model.turret.visible = !!(s.spec && s.spec.gun);
       v.model.turret.rotation.y = s.gunAim;
       v.recoil = Math.max(0, v.recoil - dt * 4);
       v.model.barrel.position.z = 1.0 * v.model.def.gunSize - v.recoil * 1.2;
       v.model.barrel.rotation.x = -0.12;
       const radiating = s.alive && s.radar !== false;
       if (radiating) v.model.radar.rotation.y += dt * (s.dmg?.radar ? 0.6 : 2.6);
-
-      // radar sweep on the water for our own radiating ships
-      const showBeam = radiating && s.side === viewerSide && this.showBeams !== false;
-      if (showBeam && !v.beam) {
-        if (!GameView.beamGeo) GameView.beamGeo = beamGeometry();
-        v.beam = new THREE.Mesh(GameView.beamGeo, beamMaterial());
-        v.beam.frustumCulled = false;
-        v.beam.renderOrder = 1;
-        v.beam.position.y = 1.2;
-        this.scene.add(v.beam);
-      }
-      if (v.beam) {
-        v.beam.visible = showBeam;
-        if (showBeam) {
-          const r = radarRange(s);
-          v.beam.position.x = s.x;
-          v.beam.position.z = s.z;
-          v.beam.scale.set(r, 1, r);
-          v.beam.rotation.y = s.heading + v.model.radar.rotation.y;
-          const sel = selected && selected.has(s.id);
-          v.beam.material.uniforms.strength.value += ((sel ? 0.13 : 0.06) - v.beam.material.uniforms.strength.value) * Math.min(1, dt * 4);
-        }
-      }
-
-      // jammer: pulsing violet shock rings and sparks from the mast
-      if (s.alive && s.jammer && visible && !hidden) {
-        v.jamT = (v.jamT || 0) - dt;
-        if (v.jamT <= 0) {
-          v.jamT = 1.3;
-          this.fx.ring(s.x, s.z, 520, 2.4, 0.32, 0xa070ff);
-          this.fx.ring(s.x, s.z, 200, 1.4, 0.4, 0xd0a0ff);
-        }
-        if (Math.random() < dt * 8) {
-          const m = v.model.def.mastTop;
-          const p = this.shipPoint(s, m[0], m[1], m[2]);
-          this.fx.jamSpark(p.x, p.y, p.z);
-        }
-      }
 
       if (!visible || hidden) continue;
 
@@ -500,8 +408,7 @@ export class GameView {
           break;
         }
         case 'jammed':
-          this.fx.jamSpark(e.x, e.y, e.z, 3);
-          this.fx.ring(e.x, e.z, 60, 0.8, 0.5, 0xc090ff);
+          this.fx.jamSpark(e.x, e.y, e.z, 1.5);
           break;
         case 'chaff': {
           const s = getShip(e.s);

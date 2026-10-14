@@ -3,6 +3,13 @@
 // weapon system gets used.
 import { World } from '../src/sim/world.js';
 import { AIController } from '../src/sim/ai.js';
+import { randomFleet, presetFleet, PRESETS, fleetCost, BUDGET } from '../src/fleet.js';
+
+// Every preset must fit the budget.
+for (const k of Object.keys(PRESETS)) {
+  const f = presetFleet(k);
+  if (!f || fleetCost(f) > BUDGET) throw new Error(`preset ${k} is invalid or over budget`);
+}
 
 const runs = Number(process.argv[2] || 6);
 const totals = { ssmFired: 0, ssmHits: 0, intercepts: 0, shellHits: 0 };
@@ -11,7 +18,8 @@ let resolved = 0;
 let totalTime = 0;
 
 for (let r = 0; r < runs; r++) {
-  const w = World.createScenario();
+  // Half the runs use the standard fleets, half use random designs.
+  const w = r % 2 ? World.createScenario({ blue: randomFleet('blue'), red: randomFleet('red') }) : World.createScenario();
   const ais = [new AIController(w, 'blue'), new AIController(w, 'red')];
   const dt = 1 / 30;
   let t = 0;

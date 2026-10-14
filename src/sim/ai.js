@@ -143,7 +143,7 @@ export class AIController {
       );
       if (inbound) {
         this.jamUntil.set(s.id, w.time + 20);
-        if (!s.jammer && Math.random() < dt * 1.5 * this.difficulty) this.cmd({ type: 'jammer', ships: [s.id], on: true });
+        if (!s.jammer && s.spec.canJam && Math.random() < dt * 1.5 * this.difficulty) this.cmd({ type: 'jammer', ships: [s.id], on: true });
       } else if (s.jammer && w.time > (this.jamUntil.get(s.id) || 0)) {
         this.cmd({ type: 'jammer', ships: [s.id], on: false });
       }
