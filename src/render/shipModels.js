@@ -1,0 +1,367 @@
+// Procedural low-poly warships built from merged primitives with vertex
+// colours. Flat-shaded so they read well when pixelated.
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { CLASSES } from '../config.js';
+
+const PALETTES = {
+  blue: {
+    hull: 0x7f8a94,
+    deck: 0x4c545c,
+    sup: 0x98a2ab,
+    sup2: 0x8a949d,
+    dark: 0x1a2026,
+    window: 0x10161c,
+    boot: 0x15181b,
+    red: 0x7b2c22,
+    panel: 0x5d6770,
+    pad: 0x6f7880,
+    white: 0xd8dde0,
+    stack: 0x2a2e33,
+  },
+  red: {
+    hull: 0x6c776d,
+    deck: 0x4b4640,
+    sup: 0x7f8a80,
+    sup2: 0x737e74,
+    dark: 0x1d211e,
+    window: 0x101512,
+    boot: 0x171a18,
+    red: 0x6e2a24,
+    panel: 0x58625a,
+    pad: 0x5e5a52,
+    white: 0xcfd3cc,
+    stack: 0x252826,
+  },
+};
+
+const _c = new THREE.Color();
+
+function colorize(geo, hex) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  _c.set(hex);
+  const n = g.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    col[i * 3] = _c.r;
+    col[i * 3 + 1] = _c.g;
+    col[i * 3 + 2] = _c.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return g;
+}
+
+class Builder {
+  constructor() {
+    this.parts = [];
+  }
+  box(w, h, d, x, y, z, color, ry = 0, rx = 0, rz = 0) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx) g.rotateX(rx);
+    if (rz) g.rotateZ(rz);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y, z);
+    this.parts.push(colorize(g, color));
+    return this;
+  }
+  // Box with the top narrower than the base (sloped "stealth" sides).
+  taper(w, h, d, x, y, z, color, top = 0.75, topD = 0.85) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      if (p.getY(i) > 0) {
+        p.setX(i, p.getX(i) * top);
+        p.setZ(i, p.getZ(i) * topD);
+      }
+    }
+    g.translate(x, y, z);
+    this.parts.push(colorize(g, color));
+    return this;
+  }
+  cyl(rt, rb, h, x, y, z, color, seg = 8, rx = 0) {
+    const g = new THREE.CylinderGeometry(rt, rb, h, seg);
+    if (rx) g.rotateX(rx);
+    g.translate(x, y, z);
+    this.parts.push(colorize(g, color));
+    return this;
+  }
+  sphere(r, x, y, z, color, seg = 8) {
+    const g = new THREE.SphereGeometry(r, seg, Math.max(4, seg >> 1));
+    g.translate(x, y, z);
+    this.parts.push(colorize(g, color));
+    return this;
+  }
+  add(geo) {
+    this.parts.push(geo);
+    return this;
+  }
+  build() {
+    const g = mergeGeometries(this.parts, false);
+    g.computeBoundingSphere();
+    return g;
+  }
+}
+
+// Hull from cross-sections. Stern at -len/2, bow at +len/2.
+function hullGeometry(len, beam, free, draft, pal, opts = {}) {
+  const N = 16;
+  const pos = [];
+  const col = [];
+  const cHull = new THREE.Color(pal.hull);
+  const cBoot = new THREE.Color(pal.boot);
+  const cRed = new THREE.Color(pal.red);
+  const cDeck = new THREE.Color(pal.deck);
+  const sections = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const z = -len / 2 + t * len;
+    let hw;
+    if (t < 0.12) hw = 0.42 + (t / 0.12) * 0.08;
+    else if (t < 0.55) hw = 0.5;
+    else hw = 0.5 * (1 - Math.pow((t - 0.55) / 0.45, 1.7));
+    hw = Math.max(hw * beam, 0.02);
+    const sheer = free * (1 + (opts.sheer ?? 0.4) * Math.pow(Math.max(0, (t - 0.5) / 0.5), 2));
+    const d = draft * (t > 0.85 ? 1 - (t - 0.85) / 0.15 * 0.7 : t < 0.1 ? 0.7 + t * 3 : 1);
+    // bow flare: deck edge wider than waterline toward the bow
+    const flare = t > 0.6 ? 1.0 + (t - 0.6) * 0.25 : 1.0;
+    sections.push([
+      [hw * flare, sheer, z],
+      [hw * 0.97, 0.7, z],
+      [hw * 0.94, -0.5, z],
+      [hw * 0.5, -d * 0.85, z],
+      [0, -d, z],
+    ]);
+  }
+  const tri = (a, b, c, color) => {
+    pos.push(...a, ...b, ...c);
+    for (let k = 0; k < 3; k++) col.push(color.r, color.g, color.b);
+  };
+  const mirror = (p) => [-p[0], p[1], p[2]];
+  const bandColor = [cHull, cBoot, cRed, cRed];
+  for (let i = 0; i < N; i++) {
+    const A = sections[i];
+    const B = sections[i + 1];
+    for (let k = 0; k < 4; k++) {
+      // starboard (+x)
+      tri(A[k], B[k], A[k + 1], bandColor[k]);
+      tri(A[k + 1], B[k], B[k + 1], bandColor[k]);
+      // port (-x): mirroring flips handedness
+      tri(mirror(A[k]), mirror(A[k + 1]), mirror(B[k]), bandColor[k]);
+      tri(mirror(A[k + 1]), mirror(B[k + 1]), mirror(B[k]), bandColor[k]);
+    }
+    // deck
+    tri(A[0], mirror(A[0]), B[0], cDeck);
+    tri(mirror(A[0]), mirror(B[0]), B[0], cDeck);
+  }
+  // transom
+  const S = sections[0];
+  for (let k = 0; k < 4; k++) {
+    const c = k === 0 ? cHull : bandColor[k];
+    tri(S[k], S[k + 1], mirror(S[k]), c);
+    tri(mirror(S[k]), S[k + 1], mirror(S[k + 1]), c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2));
+  g.computeVertexNormals();
+  return { geo: g, deckAt: (z) => sections[Math.round(((z + len / 2) / len) * N)][0][1] };
+}
+
+function turretGeometry(pal, size = 1) {
+  const b = new Builder();
+  b.taper(3.2 * size, 1.6 * size, 3.8 * size, 0, 0.8 * size, 0, pal.sup, 0.7, 0.75);
+  b.box(0.35 * size, 0.35 * size, 1.2 * size, 0, 1.0 * size, 2.0 * size, pal.sup2);
+  return b.build();
+}
+
+function barrelGeometry(pal, size = 1) {
+  const b = new Builder();
+  b.cyl(0.18 * size, 0.24 * size, 5.5 * size, 0, 0, 2.75 * size, pal.dark, 6, Math.PI / 2);
+  return b.build();
+}
+
+function radarGeometry(pal, w = 4) {
+  const b = new Builder();
+  b.box(w, 0.7, 0.35, 0, 0, 0, pal.dark);
+  b.box(0.3, 0.6, 0.3, 0, -0.5, 0, pal.dark);
+  return b.build();
+}
+
+function ciws(b, pal, x, y, z) {
+  b.cyl(0.9, 1.1, 1.0, x, y + 0.5, z, pal.sup2, 8);
+  b.cyl(0.75, 0.75, 1.4, x, y + 1.7, z, pal.white, 8);
+  b.sphere(0.75, x, y + 2.4, z, pal.white, 8);
+  b.box(0.25, 0.25, 1.6, x, y + 1.3, z + 1.0, pal.dark);
+}
+
+function buildDDG(pal, side) {
+  const c = CLASSES.ddg;
+  const b = new Builder();
+  const hull = hullGeometry(c.len, c.beam, 4.2, 3.2, pal);
+  b.add(hull.geo);
+  const deck = 4.4;
+  if (side === 'blue') {
+    // forward VLS
+    b.box(5.0, 0.3, 6.5, 0, deck + 0.1, 18, pal.panel);
+    for (let i = -2; i <= 2; i++) b.box(0.12, 0.32, 6.5, i * 0.9, deck + 0.12, 18, pal.dark);
+    // main superstructure + bridge
+    b.taper(7.2, 6.5, 14, 0, deck + 3.2, 5, pal.sup, 0.82, 0.88);
+    b.taper(6.4, 2.6, 7, 0, deck + 7.6, 7.5, pal.sup2, 0.85, 0.85);
+    b.box(6.0, 0.7, 0.4, 0, deck + 8.0, 11.1, pal.window);
+    // SPY-style faces
+    b.box(4.2, 3.6, 0.3, 0, deck + 5.4, 12.1, pal.panel, 0, -0.25);
+    b.box(0.3, 3.6, 4.2, 3.55, deck + 5.4, 8.5, pal.panel, 0, 0, -0.25);
+    b.box(0.3, 3.6, 4.2, -3.55, deck + 5.4, 8.5, pal.panel, 0, 0, 0.25);
+    // mast
+    b.taper(1.6, 9, 1.6, 0, deck + 13.5, 5.5, pal.sup2, 0.4, 0.4);
+    b.box(7, 0.25, 0.25, 0, deck + 15.5, 5.5, pal.dark);
+    b.box(0.15, 4, 0.15, 0, deck + 19.5, 5.5, pal.dark);
+    // funnels
+    b.taper(3.6, 5, 4.4, 0, deck + 2.5, -4.5, pal.sup2, 0.8, 0.8);
+    b.box(2.6, 0.5, 3.2, 0, deck + 5.2, -4.5, pal.stack);
+    b.taper(3.6, 4.6, 4.4, 0, deck + 2.3, -13.5, pal.sup2, 0.8, 0.8);
+    b.box(2.6, 0.5, 3.2, 0, deck + 4.8, -13.5, pal.stack);
+    // aft VLS between funnels
+    b.box(5.0, 0.3, 4.5, 0, deck + 0.1, -9, pal.panel);
+    // hangar + flight deck
+    b.taper(7.2, 4.6, 9, 0, deck + 2.2, -20, pal.sup, 0.9, 0.95);
+    b.box(6.6, 0.12, 10, 0, deck + 0.02, -27.5, pal.pad);
+    b.box(0.25, 0.14, 8, 0, deck + 0.05, -27.5, pal.white);
+    ciws(b, pal, 0, deck + 4.6, -18);
+    ciws(b, pal, 0, deck + 6.5, 12.6);
+  } else {
+    // Red Pact: slab-sided, busier silhouette, deck launchers.
+    b.box(6.4, 0.6, 4, 0, deck + 0.3, 20, pal.sup2);
+    b.box(1.6, 1.4, 7, 2.2, deck + 1.0, 14, pal.panel, 0, 0.18);
+    b.box(1.6, 1.4, 7, -2.2, deck + 1.0, 14, pal.panel, 0, 0.18);
+    b.box(7.4, 6, 13, 0, deck + 3, 4, pal.sup);
+    b.box(6.6, 2.4, 6, 0, deck + 7.2, 6.5, pal.sup2);
+    b.box(6.2, 0.7, 0.4, 0, deck + 7.6, 9.6, pal.window);
+    b.box(1.4, 11, 1.4, 0, deck + 14, 4, pal.sup2);
+    b.sphere(2.2, 0, deck + 20, 4, pal.white, 10);
+    b.box(6, 0.3, 0.3, 0, deck + 16.5, 4, pal.dark);
+    b.box(4.5, 6, 6, 0, deck + 3, -6.5, pal.sup2);
+    b.box(3.6, 1, 5, 0, deck + 6.5, -6.5, pal.stack);
+    b.box(1.2, 7, 1.2, 0, deck + 9, -11, pal.sup2);
+    b.box(5, 0.3, 0.3, 0, deck + 11, -11, pal.dark);
+    b.box(6.8, 4, 8, 0, deck + 2, -17, pal.sup);
+    b.box(6.6, 0.12, 12, 0, deck + 0.02, -26, pal.pad);
+    ciws(b, pal, 2.6, deck + 4, -14);
+    ciws(b, pal, -2.6, deck + 4, -14);
+  }
+  return { geo: b.build(), deck, gunZ: c.len * 0.3, gunSize: 1.1, radarY: deck + (side === 'blue' ? 17.8 : 23), radarZ: side === 'blue' ? 5.5 : 4, stacks: [[0, deck + 5.6, -4.5], [0, deck + 5.2, -13.5]], ciws: [[0, deck + 7, -18], [0, deck + 9, 12.6]], mastTop: [0, deck + 21.5, 5.5] };
+}
+
+function buildFFG(pal, side) {
+  const c = CLASSES.ffg;
+  const b = new Builder();
+  const hull = hullGeometry(c.len, c.beam, 3.6, 2.6, pal, { sheer: 0.35 });
+  b.add(hull.geo);
+  const deck = 3.8;
+  if (side === 'blue') {
+    b.box(4.0, 0.3, 4, 0, deck + 0.1, 11, pal.panel);
+    b.taper(6.2, 6.2, 17, 0, deck + 3.1, -1, pal.sup, 0.78, 0.9);
+    b.box(5.2, 0.6, 0.3, 0, deck + 5.3, 7.3, pal.window);
+    b.taper(3.2, 9, 3.6, 0, deck + 10.5, 1.5, pal.sup2, 0.35, 0.35);
+    b.box(0.15, 3, 0.15, 0, deck + 16, 1.5, pal.dark);
+    b.box(2.8, 1.2, 3.4, 0, deck + 6.6, -4, pal.stack);
+    b.box(5.8, 0.12, 9, 0, deck + 0.02, -18.5, pal.pad);
+    ciws(b, pal, 0, deck + 6.2, -8);
+  } else {
+    b.box(5.4, 5.6, 14, 0, deck + 2.8, 0, pal.sup);
+    b.box(4.8, 2.2, 5, 0, deck + 6.6, 3.5, pal.sup2);
+    b.box(4.6, 0.6, 0.3, 0, deck + 7, 6.1, pal.window);
+    b.box(1.6, 1.3, 6, 1.9, deck + 1.0, 11, pal.panel, 0, 0.15);
+    b.box(1.6, 1.3, 6, -1.9, deck + 1.0, 11, pal.panel, 0, 0.15);
+    b.box(1.2, 9, 1.2, 0, deck + 11, 2, pal.sup2);
+    b.sphere(1.6, 0, deck + 16, 2, pal.white, 8);
+    b.box(3.2, 3, 4, 0, deck + 7, -4, pal.stack);
+    b.box(5.8, 0.12, 9, 0, deck + 0.02, -18, pal.pad);
+    ciws(b, pal, 0, deck + 5.6, -6);
+  }
+  return { geo: b.build(), deck, gunZ: c.len * 0.3, gunSize: 0.95, radarY: deck + (side === 'blue' ? 15.3 : 18), radarZ: side === 'blue' ? 1.5 : 2, stacks: [[0, deck + 7.4, -4]], ciws: [[0, deck + 8.6, -8]], mastTop: [0, deck + 17.5, 1.5] };
+}
+
+function buildFAC(pal, side) {
+  const c = CLASSES.fac;
+  const b = new Builder();
+  const hull = hullGeometry(c.len, c.beam, 2.2, 1.6, pal, { sheer: 0.3 });
+  b.add(hull.geo);
+  const deck = 2.4;
+  b.taper(3.6, 3.2, 8, 0, deck + 1.6, 1.5, pal.sup, 0.8, 0.85);
+  b.box(3.2, 0.5, 0.25, 0, deck + 2.6, 5.4, pal.window);
+  b.taper(1.0, 5, 1.0, 0, deck + 5.5, 0.5, pal.sup2, 0.5, 0.5);
+  if (side === 'red') b.sphere(0.9, 0, deck + 8.4, 0.5, pal.white, 8);
+  // missile canisters, angled outboard and up
+  for (const s of [-1, 1]) {
+    b.box(0.9, 0.9, 5.2, s * 1.3, deck + 0.9, -6, pal.panel, s * 0.5, -0.28);
+    b.box(0.9, 0.9, 5.2, s * 1.3, deck + 1.9, -6.5, pal.panel, s * 0.5, -0.28);
+  }
+  ciws(b, pal, 0, deck, -10.5);
+  return { geo: b.build(), deck, gunZ: c.len * 0.3, gunSize: 0.6, radarY: deck + 7.6, radarZ: 0.5, stacks: [[0, deck + 3.4, -2]], ciws: [[0, deck + 2.6, -10.5]], mastTop: [0, deck + 8.4, 0.5] };
+}
+
+const cache = new Map();
+let hullMat = null;
+
+export function shipMaterial() {
+  if (!hullMat) {
+    hullMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0.12 });
+  }
+  return hullMat;
+}
+
+const lightMats = {};
+function lightMat(r, g, b) {
+  const key = `${r},${g},${b}`;
+  if (!lightMats[key]) lightMats[key] = new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b), fog: false });
+  return lightMats[key];
+}
+
+export function buildShipModel(cls, side) {
+  const key = cls + side;
+  if (!cache.has(key)) {
+    const pal = PALETTES[side];
+    const def = cls === 'ddg' ? buildDDG(pal, side) : cls === 'ffg' ? buildFFG(pal, side) : buildFAC(pal, side);
+    def.turretGeo = turretGeometry(pal, def.gunSize);
+    def.barrelGeo = barrelGeometry(pal, def.gunSize);
+    def.radarGeo = radarGeometry(pal, cls === 'fac' ? 2.2 : 4);
+    cache.set(key, def);
+  }
+  const def = cache.get(key);
+  const mat = shipMaterial();
+  const group = new THREE.Group();
+  const body = new THREE.Group(); // receives bob/pitch/roll
+  group.add(body);
+  const hull = new THREE.Mesh(def.geo, mat);
+  body.add(hull);
+
+  const turret = new THREE.Group();
+  turret.position.set(0, def.deck, def.gunZ);
+  turret.add(new THREE.Mesh(def.turretGeo, mat));
+  const barrel = new THREE.Group();
+  barrel.position.set(0, 1.0 * def.gunSize, 1.0 * def.gunSize);
+  barrel.add(new THREE.Mesh(def.barrelGeo, mat));
+  turret.add(barrel);
+  body.add(turret);
+
+  const radar = new THREE.Mesh(def.radarGeo, mat);
+  radar.position.set(0, def.radarY, def.radarZ);
+  body.add(radar);
+
+  // navigation lights (HDR so they bloom at night)
+  const lightGeo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+  const c = CLASSES[cls];
+  const port = new THREE.Mesh(lightGeo, lightMat(5, 0.2, 0.15));
+  port.position.set(-c.beam * 0.5, def.deck + 3, c.len * 0.1);
+  const stbd = new THREE.Mesh(lightGeo, lightMat(0.2, 5, 0.6));
+  stbd.position.set(c.beam * 0.5, def.deck + 3, c.len * 0.1);
+  const top = new THREE.Mesh(lightGeo, lightMat(5, 5, 4.5));
+  top.position.set(...def.mastTop);
+  body.add(port, stbd, top);
+
+  return { group, body, turret, barrel, radar, def };
+}
