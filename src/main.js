@@ -50,9 +50,10 @@ class Game {
     this.fill = new THREE.DirectionalLight(0xffffff, 1);
     this.scene.add(this.sun, this.sun.target, this.hemi, this.fill);
 
-    this.prefs = { env: 'dusk', diff: '1', pixel: '0', vol: 0.8, voice: true, ...loadPrefs() };
+    this.prefs = { env: 'dusk', diff: '1', pixel: '0', filter: 'soft', vol: 0.8, voice: true, ...loadPrefs() };
     this.applyEnv(this.prefs.env);
     this.r.setPixelScale(+this.prefs.pixel);
+    this.r.setFilter(this.prefs.filter);
     this.audio.setVolume(+this.prefs.vol);
     this.audio.voice = !!this.prefs.voice;
 
@@ -462,6 +463,12 @@ class Game {
     $('opt-env').value = p.env;
     $('opt-diff').value = p.diff;
     $('opt-pixel').value = p.pixel;
+    $('opt-filter').value = p.filter;
+    $('opt-filter').onchange = (e) => {
+      p.filter = e.target.value;
+      this.r.setFilter(p.filter);
+      savePrefs(p);
+    };
     $('opt-vol').value = p.vol;
     $('opt-voice').checked = p.voice;
     $('opt-env').onchange = (e) => {
