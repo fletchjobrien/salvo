@@ -6,10 +6,10 @@ import { CLASSES } from '../config.js';
 
 const PALETTES = {
   blue: {
-    hull: 0x7f8a94,
-    deck: 0x4c545c,
-    sup: 0x98a2ab,
-    sup2: 0x8a949d,
+    hull: 0x8e99a3,
+    deck: 0x58616a,
+    sup: 0xaab4bd,
+    sup2: 0x9aa4ad,
     dark: 0x1a2026,
     window: 0x10161c,
     boot: 0x15181b,
@@ -20,10 +20,10 @@ const PALETTES = {
     stack: 0x2a2e33,
   },
   red: {
-    hull: 0x6c776d,
-    deck: 0x4b4640,
-    sup: 0x7f8a80,
-    sup2: 0x737e74,
+    hull: 0x7f8a7c,
+    deck: 0x5a544b,
+    sup: 0x95a093,
+    sup2: 0x879285,
     dark: 0x1d211e,
     window: 0x101512,
     boot: 0x171a18,

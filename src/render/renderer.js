@@ -134,7 +134,7 @@ export class Renderer {
         near: { value: this.camera.near },
         far: { value: this.camera.far },
         levels: { value: 22 },
-        bloomStr: { value: 0.55 },
+        bloomStr: { value: 0.45 },
         exposure: { value: 1 },
         time: { value: 0 },
         vignette: { value: 0.9 },

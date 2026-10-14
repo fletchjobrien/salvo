@@ -75,18 +75,20 @@ export function createOcean(env) {
         f = f * f * (3.0 - 2.0 * f);
         return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
       }
-      vec2 detail(vec2 p, float t) {
+      // Extra wave octaves for the normal only. Each fades out once it is
+      // smaller than a few pixels, which kills shimmering moire.
+      vec2 detail(vec2 p, float t, float dist) {
         vec2 g = vec2(0.0);
-        const int N = 6;
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < 9; i++) {
           float fi = float(i);
           float ang = fi * 2.399 + 0.6;
           vec2 dir = vec2(cos(ang), sin(ang));
-          float len = 15.0 * pow(0.68, fi);
+          float len = 34.0 * pow(0.74, fi);
           float k = 6.2831 / len;
           float w = sqrt(9.8 * k);
-          float a = 0.09 * len / 15.0;
-          g += dir * (a * k) * cos(k * dot(dir, p) - w * t + fi * 4.1);
+          float a = 0.07 * len / 15.0;
+          float fade = 1.0 - smoothstep(len * 6.0, len * 22.0, dist);
+          g += dir * (a * k * fade) * cos(k * dot(dir, p) - w * t + fi * 4.1);
         }
         return g;
       }
@@ -95,7 +97,7 @@ export function createOcean(env) {
         float dist = length(toCam);
         vec3 V = toCam / dist;
         vec2 g = waveGrad(vWorld.xz, time) * (0.35 + 0.65 * (1.0 - smoothstep(1500.0, 6000.0, dist)));
-        g += detail(vWorld.xz, time) * (1.0 - smoothstep(200.0, 2600.0, dist));
+        g += detail(vWorld.xz, time, dist);
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
 
         float ndv = max(dot(N, V), 0.0);
@@ -114,10 +116,13 @@ export function createOcean(env) {
         float sd = max(dot(R, sunDir), 0.0);
         col += sunColor * (pow(sd, 900.0) * 9.0 + pow(sd, 90.0) * 0.5);
 
-        // whitecaps
-        float n = noise(vWorld.xz * 0.045 + time * 0.05) * 0.8 + noise(vWorld.xz * 0.17) * 0.4;
-        float foam = smoothstep(1.35, 1.95, vH + n) * (1.0 - smoothstep(600.0, 2500.0, dist));
-        col = mix(col, foamColor * (0.45 + 0.55 * diff), foam * 0.75);
+        // whitecaps: small broken patches only on the highest crests
+        float hn = vH / 2.0;
+        float n1 = noise(vWorld.xz * 0.08 + time * 0.05);
+        float n2 = noise(vWorld.xz * 0.35 - time * 0.1);
+        float foam = smoothstep(0.62, 0.95, hn + (n1 - 0.5) * 0.5) * smoothstep(0.45, 0.8, n2);
+        foam *= 1.0 - smoothstep(500.0, 1800.0, dist);
+        col = mix(col, foamColor * (0.5 + 0.5 * diff), foam * 0.8);
 
         float f = 1.0 - exp(-pow(dist * fogDensity, 2.0));
         col = mix(col, fogColor, f);

@@ -5,6 +5,18 @@ import { WORLD } from '../config.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
+// Transparent effects must not touch destination alpha: the post pass uses
+// alpha==1 to find solid geometry for ink outlines.
+export function keepAlpha(mat, additive = false) {
+  mat.blending = THREE.CustomBlending;
+  mat.blendEquation = THREE.AddEquation;
+  mat.blendSrc = THREE.SrcAlphaFactor;
+  mat.blendDst = additive ? THREE.OneFactor : THREE.OneMinusSrcAlphaFactor;
+  mat.blendSrcAlpha = THREE.ZeroFactor;
+  mat.blendDstAlpha = THREE.OneFactor;
+  return mat;
+}
+
 const POINT_VERT = /* glsl */ `
   uniform float uScale, fogDensity, additive;
   uniform vec3 fogColor;
@@ -13,8 +25,11 @@ const POINT_VERT = /* glsl */ `
   varying vec4 vC;
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * mv;
     float ps = size * uScale / max(-mv.z, 1.0);
+    // Pull the sprite toward the camera by its radius so big smoke puffs
+    // are not sliced off by the sea surface.
+    vec3 pulled = mv.xyz + normalize(-mv.xyz) * min(size * 0.5, -mv.z * 0.5);
+    gl_Position = projectionMatrix * vec4(pulled, 1.0);
     vC = color;
     if (ps < 1.0) { vC.a *= ps; ps = 1.0; }
     gl_PointSize = min(ps, 300.0);
@@ -32,7 +47,8 @@ const POINT_FRAG = /* glsl */ `
     vec2 c = gl_PointCoord * 2.0 - 1.0;
     float r = dot(c, c);
     if (r > 1.0) discard;
-    gl_FragColor = vec4(vC.rgb, vC.a * (1.0 - r * soft));
+    float d = sqrt(r);
+    gl_FragColor = vec4(vC.rgb, vC.a * pow(1.0 - d, soft));
   }`;
 
 class Particles {
@@ -63,7 +79,7 @@ class Particles {
       fogDensity: { value: 0.00006 },
       fogColor: { value: new THREE.Color() },
       additive: { value: additive ? 1 : 0 },
-      soft: { value: additive ? 0.6 : 0.35 },
+      soft: { value: additive ? 1.2 : 0.7 },
     };
     this.mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
@@ -71,8 +87,8 @@ class Particles {
       fragmentShader: POINT_FRAG,
       transparent: true,
       depthWrite: false,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
+    keepAlpha(this.mat, additive);
     this.points = new THREE.Points(geo, this.mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = additive ? 3 : 2;
@@ -153,13 +169,7 @@ class Tracers {
     geo.setAttribute('color', this.colBuf);
     this.mesh = new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      }),
+      keepAlpha(new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, fog: false }), true),
     );
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 4;
@@ -230,7 +240,7 @@ export class Effects {
     for (let i = 0; i < 24; i++) {
       const m = new THREE.Mesh(
         ringGeo,
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }),
+        keepAlpha(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false }), true),
       );
       m.visible = false;
       m.renderOrder = 1;
@@ -319,13 +329,17 @@ export class Effects {
   explosion(x, y, z, scale = 1, water = true) {
     const f = this.fire;
     const s = this.smoke;
-    f.emit(x, y, z, 0, 0, 0, 0.22, 40 * scale, 70 * scale, C(6, 5, 3.5, 1), C(3, 1.2, 0.3, 0));
-    for (let i = 0; i < 26 * scale; i++) {
+    f.emit(x, y, z, 0, 0, 0, 0.18, 45 * scale, 80 * scale, C(3.2, 2.6, 1.8, 1), C(2, 0.8, 0.2, 0));
+    for (let i = 0; i < 40 * scale; i++) {
       const a = Math.random() * Math.PI * 2;
       const u = rand(-0.3, 1);
-      const sp = rand(10, 38) * scale;
+      const sp = rand(12, 48) * scale;
       const r = Math.sqrt(1 - u * u);
-      f.emit(x, y, z, Math.cos(a) * r * sp, u * sp + 8, Math.sin(a) * r * sp, rand(0.5, 1.2), rand(7, 12) * scale, rand(18, 30) * scale, C(5, 3.2, 1.2, 1), C(1.2, 0.25, 0.05, 0), 2.5, -6);
+      f.emit(x, y, z, Math.cos(a) * r * sp, u * sp + 10, Math.sin(a) * r * sp, rand(0.6, 1.6), rand(10, 18) * scale, rand(26, 46) * scale, C(3.6, 1.9, 0.55, 1), C(1.2, 0.2, 0.03, 0), 2.2, -7);
+    }
+    // lingering glowing core
+    for (let i = 0; i < 8; i++) {
+      f.emit(x + rand(-6, 6) * scale, y + rand(0, 8) * scale, z + rand(-6, 6) * scale, 0, rand(4, 10), 0, rand(1.4, 2.4), 22 * scale, 34 * scale, C(3.5, 1.4, 0.3, 0.9), C(0.6, 0.1, 0.02, 0), 1, -3);
     }
     for (let i = 0; i < 22 * scale; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -348,7 +362,7 @@ export class Effects {
       this.waterColumn(x, z, 0.6 * scale);
       this.ring(x, z, 70 * scale, 1.6, 0.5);
     }
-    this.flash(x, y + 10, z, 0xffa860, 60 * scale, 500 * scale, 0.9);
+    this.flash(x, y + 10, z, 0xffa860, 45 * scale, 500 * scale, 0.9);
     this.addShake(x, y, z, 1.4 * scale);
   }
 
@@ -524,8 +538,8 @@ export class Effects {
   }
 
   funnel(x, y, z, dark) {
-    const g = dark ? 0.12 : 0.55;
-    this.smoke.emit(x, y, z, rand(-0.5, 0.5) + 1.5, rand(2, 4), rand(-0.5, 0.5), rand(3, 6), 2.5, dark ? 26 : 14, this.smokeColor(g, dark ? 0.7 : 0.18), this.smokeColor(g * 1.4, 0), 0.4, -0.8);
+    const g = dark ? 0.1 : 0.6;
+    this.smoke.emit(x + rand(-0.5, 0.5), y, z + rand(-0.5, 0.5), rand(-0.5, 0.5) + 1.5, rand(2, 4), rand(-0.5, 0.5), rand(3, 6), 2, dark ? 22 : 10, this.smokeColor(g, dark ? 0.55 : 0.1), this.smokeColor(g * 1.4, 0), 0.4, -0.8);
   }
 
   spray(x, y, z, vx, vz, amount) {

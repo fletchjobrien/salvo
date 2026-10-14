@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>SALVO — Naval Combat</title>
+    <meta name="description" content="Casual near-future naval missile combat. Command a task group against the AI or a friend." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23061520'/%3E%3Cpath d='M2 10h12l-2 3H4z' fill='%2362d8ff'/%3E%3Cpath d='M7 5h2v5H7z' fill='%2362d8ff'/%3E%3Cpath d='M10 2l3 3-1 1-3-3z' fill='%23ff4d3d'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <canvas id="overlay"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="topbar">
+        <div id="clock">T+00:00</div>
+        <div id="speedind">1×</div>
+        <div id="score"></div>
+      </div>
+      <div id="alert" class="hidden">VAMPIRE INBOUND</div>
+      <div id="log"></div>
+      <div id="minimap-wrap"><canvas id="minimap"></canvas></div>
+      <div id="fleet"></div>
+      <div id="orders"></div>
+      <button id="helpbtn" title="Controls (?)">?</button>
+    </div>
+
+    <div id="menu" class="screen">
+      <div class="title-wrap">
+        <h1>SALVO</h1>
+        <div class="subtitle">NAVAL COMBAT IN THE MISSILE AGE · 2038</div>
+      </div>
+      <div class="panel" id="main-panel">
+        <button class="big" id="btn-skirmish">SKIRMISH VS AI</button>
+        <button class="big" id="btn-host">HOST MULTIPLAYER</button>
+        <div class="row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" />
+          <button id="btn-join">JOIN</button>
+        </div>
+        <div class="row opts">
+          <label>SCENE
+            <select id="opt-env">
+              <option value="dusk">Golden Hour</option>
+              <option value="day">Clear Morning</option>
+              <option value="night">Moonlit Night</option>
+            </select>
+          </label>
+          <label>AI
+            <select id="opt-diff">
+              <option value="0.75">Relaxed</option>
+              <option value="1" selected>Standard</option>
+              <option value="1.4">Veteran</option>
+            </select>
+          </label>
+        </div>
+        <div class="row opts">
+          <label>PIXELS
+            <select id="opt-pixel">
+              <option value="0">Auto</option>
+              <option value="2">Fine</option>
+              <option value="3">Chunky</option>
+              <option value="4">Retro</option>
+            </select>
+          </label>
+          <label>VOL <input type="range" id="opt-vol" min="0" max="1" step="0.05" value="0.8" /></label>
+          <label class="check"><input type="checkbox" id="opt-voice" checked /> VOICE</label>
+        </div>
+        <div id="menu-msg"></div>
+      </div>
+      <div class="howto">
+        <b>LMB</b> select · drag box · <b>RMB</b> move / target · <b>F</b> fire salvo · <b>G</b> chaff ·
+        <b>WASD</b> pan · <b>Q/E</b> rotate · wheel zoom · <b>1–4</b> ships · <b>`</b> all · <b>SPACE</b> pause
+      </div>
+    </div>
+
+    <div id="wait" class="screen hidden">
+      <div class="panel">
+        <div class="label">ROOM CODE</div>
+        <div id="room-code">----</div>
+        <div class="label" id="wait-msg">Waiting for an opponent to join…</div>
+        <button id="btn-cancel">CANCEL</button>
+      </div>
+    </div>
+
+    <div id="end" class="screen hidden">
+      <div class="panel">
+        <h2 id="end-title">VICTORY</h2>
+        <div id="end-stats"></div>
+        <button class="big" id="btn-again">PLAY AGAIN</button>
+        <button id="btn-menu">MAIN MENU</button>
+      </div>
+    </div>
+
+    <div id="help" class="screen hidden">
+      <div class="panel wide">
+        <h2>COMMAND REFERENCE</h2>
+        <table>
+          <tr><td>Left click / drag</td><td>Select ship(s). Shift adds to selection.</td></tr>
+          <tr><td>Right click sea</td><td>Move there (selected keep formation). Shift queues waypoints.</td></tr>
+          <tr><td>Right click enemy</td><td>Designate target for guns.</td></tr>
+          <tr><td>F, then click enemy</td><td>Launch an anti-ship missile salvo. Z/X/C sets salvo size 2/4/6.</td></tr>
+          <tr><td>G</td><td>Fire chaff decoys — use when VAMPIRES are inbound.</td></tr>
+          <tr><td>[ / ]  or  R / V</td><td>Ring up more / less speed. Backspace = all stop.</td></tr>
+          <tr><td>1–4, `</td><td>Select ship / whole fleet. Double-tap to jump the camera.</td></tr>
+          <tr><td>H / double-click</td><td>Follow selected ship.  M = ride the newest missile.</td></tr>
+          <tr><td>WASD / arrows, Q / E</td><td>Pan, rotate. Middle-drag or right-drag also rotates.</td></tr>
+          <tr><td>Space, T</td><td>Pause, time compression (vs AI only).</td></tr>
+        </table>
+        <p>Your SAMs and CIWS shoot down incoming missiles automatically. Big salvos saturate defences — small ones get swatted.</p>
+        <button id="btn-help-close">BACK TO THE BRIDGE</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
