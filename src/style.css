@@ -170,3 +170,14 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
   #log { width: 50vw; }
   #orders { width: calc(100vw - 20px); }
 }
+
+/* ---------- electronic warfare */
+#orders .sensors button { font-size: 16px; letter-spacing: 0.04em; }
+#orders button.radar.on { background: rgba(60, 200, 110, 0.85); border-color: #7dff9a; color: #04121b; box-shadow: 0 0 10px rgba(125,255,154,0.45); }
+#orders button.radar.off { background: rgba(30, 30, 30, 0.85); border-color: #556; color: #8a96a0; }
+#orders button.radar.mixed { border-color: #7dff9a; color: #7dff9a; }
+#orders button.jam { border-color: rgba(180, 130, 255, 0.55); }
+#orders button.jam:hover { background: rgba(70, 30, 120, 0.9); border-color: #c49bff; }
+#orders button.jam.on { background: #8d5cff; border-color: #d4b8ff; color: #fff; box-shadow: 0 0 14px rgba(170,120,255,0.7); animation: jampulse 0.9s ease-in-out infinite; }
+@keyframes jampulse { 50% { box-shadow: 0 0 22px rgba(190,140,255,0.95); } }
+#log .ew { color: #c9a6ff; }

@@ -548,6 +548,15 @@ export class Effects {
     }
   }
 
+  // Electronic warfare: crackling violet sparks.
+  jamSpark(x, y, z, k = 1) {
+    for (let i = 0; i < 3 * k; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rand(6, 22) * k;
+      this.fire.emit(x, y, z, Math.cos(a) * sp, rand(-4, 10), Math.sin(a) * sp, rand(0.15, 0.4), rand(1.5, 3) * k, 0.5, C(2.2, 1.2, 4.5, 1), C(0.6, 0.2, 1.6, 0), 3, 0);
+    }
+  }
+
   sinkBlast(x, z) {
     this.explosion(x, 8, z, 2.2);
     this.ring(x, z, 260, 2.8, 0.6, 0xffd0a0);

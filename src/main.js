@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { CLASSES, WEAPONS, SPEED_LEVELS } from './config.js';
-import { World, computeVisibility, radarRange } from './sim/world.js';
+import { CLASSES, WEAPONS, SPEED_LEVELS, SENSORS } from './config.js';
+import { World, computeSensors, radarRange } from './sim/world.js';
 import { AIController } from './sim/ai.js';
 import { Renderer } from './render/renderer.js';
 import { ENVIRONMENTS } from './render/env.js';
@@ -352,9 +352,10 @@ class Game {
 
   fireAt(target) {
     const ids = this.liveSelected();
+    const c = this.contactPos(target) || target;
     const shooters = ids
       .map((id) => this.shipById(id))
-      .filter((s) => s.ssm > 0 && Math.hypot(s.x - target.x, s.z - target.z) < WEAPONS.ssm.range);
+      .filter((s) => s.ssm > 0 && Math.hypot(s.x - c.x, s.z - c.z) < WEAPONS.ssm.range);
     if (!shooters.length) {
       this.audio.deny();
       const any = ids.some((id) => this.shipById(id).ssm > 0);
@@ -365,8 +366,37 @@ class Game {
     this.fireMode = false;
     this.audio.order();
     const n = Math.min(this.salvo, shooters.reduce((a, s) => a + s.ssm, 0));
-    this.hud.message(`SALVO ×${n} → ${CLASSES[target.cls].short} ${target.name.toUpperCase()}`, 'friend');
-    this.audio.say(`Salvo, ${n} birds. Target ${target.name}.`, true);
+    if (c.esm) {
+      this.hud.message(`SALVO ×${n} ON ESM BEARING → ${CLASSES[target.cls].short} EMITTER`, 'friend');
+      this.audio.say(`Salvo, ${n} birds, firing on bearing.`, true);
+    } else {
+      this.hud.message(`SALVO ×${n} → ${CLASSES[target.cls].short} ${target.name.toUpperCase()}`, 'friend');
+      this.audio.say(`Salvo, ${n} birds. Target ${target.name}.`, true);
+    }
+  }
+
+  // EMCON: toggle radars of the selection (all on unless every one is already on).
+  toggleRadar() {
+    const ships = this.liveSelected().map((id) => this.shipById(id));
+    if (!ships.length) return this.audio.deny();
+    const on = !ships.every((s) => s.radar !== false);
+    this.issue({ type: 'radar', ships: ships.map((s) => s.id), on });
+    this.audio.radarToggle(on);
+  }
+
+  toggleJammer() {
+    const ships = this.liveSelected().map((id) => this.shipById(id));
+    if (!ships.length) return this.audio.deny();
+    const on = !ships.every((s) => s.jammer);
+    this.issue({ type: 'jammer', ships: ships.map((s) => s.id), on });
+    this.audio.jamToggle(on);
+  }
+
+  // Where we believe an enemy is: exact for radar tracks, estimated for ESM.
+  contactPos(s) {
+    if (s.side === this.side || this.visible.has(s.id)) return { x: s.x, z: s.z };
+    const e = this.esm && this.esm.get(s.id);
+    return e ? { x: e.x, z: e.z, esm: true, err: e.err, jam: e.jam } : null;
   }
 
   chaff() {
@@ -387,7 +417,7 @@ class Game {
     if (m.side === this.side) return true;
     for (const s of this.state.ships) {
       if (s.side !== this.side || !s.alive) continue;
-      const r = radarRange(s);
+      const r = s.radar === false ? SENSORS.visual * 1.4 : radarRange(s);
       if ((m.x - s.x) ** 2 + (m.z - s.z) ** 2 < r * r) return true;
     }
     return false;
@@ -398,9 +428,15 @@ class Game {
     let bestD = 26;
     for (const s of this.state.ships) {
       if (!s.alive) continue;
-      if (s.side !== this.side && !this.visible.has(s.id)) continue;
+      const c = this.contactPos(s);
+      if (!c) continue;
       if (filter && !filter(s)) continue;
-      const p = this.overlay.marker(s);
+      const p = c.esm ? this.overlay.project(c.x, 8, c.z) : this.overlay.marker(s);
+      if (c.esm) {
+        p.hullX = p.x;
+        p.hullY = p.y;
+        p.len = 0;
+      }
       if (!p.ok) continue;
       const hull = Math.hypot(p.hullX - sx, p.hullY - sy) - Math.min(p.len * 0.4, 120);
       const d = Math.min(Math.hypot(p.x - sx, p.y - sy), Math.max(0, hull));
@@ -647,6 +683,8 @@ class Game {
       }
     } else if (k === 'KeyF') this.toggleFireMode();
     else if (k === 'KeyG') this.chaff();
+    else if (k === 'KeyB') this.toggleRadar();
+    else if (k === 'KeyJ') this.toggleJammer();
     else if (k === 'KeyZ') this.setSalvo(2);
     else if (k === 'KeyX') this.setSalvo(4);
     else if (k === 'KeyC') this.setSalvo(6);
@@ -770,6 +808,39 @@ class Game {
               this.audio.say(`${s.name} is going down!`, true);
             }
           }
+          break;
+        case 'emcon':
+          if (mine) this.hud.message(`${s.name.toUpperCase()}: radar ${e.on ? 'ACTIVE' : 'SILENT — SAMs offline'}`, e.on ? 'friend' : 'warn');
+          break;
+        case 'jam':
+          if (mine) {
+            this.hud.message(`${s.name.toUpperCase()}: jammer ${e.on ? 'ON' : 'off'}`, 'ew');
+            if (e.on) this.audio.say('Jammer active.');
+          }
+          break;
+        case 'esm':
+          if (e.side === me && s) {
+            const ref = this.state.ships.find((q) => q.side === me && q.alive);
+            const c = this.esm.get(s.id) || s;
+            const brg = ref ? Math.round(((Math.atan2(c.x - ref.x, c.z - ref.z) * 180) / Math.PI + 360) % 360) : 0;
+            if (e.jam) {
+              this.hud.message(`ESM: ENEMY JAMMING, BRG ${String(brg).padStart(3, '0')}`, 'ew');
+              this.audio.say('Enemy jamming detected.');
+            } else {
+              this.hud.message(`ESM: ${CLASSES[s.cls].short} RADAR EMITTER, BRG ${String(brg).padStart(3, '0')}`, 'warn');
+              this.audio.say('E S M contact.');
+            }
+            this.audio.esm();
+          }
+          break;
+        case 'jammed':
+          if (s && s.side === me) {
+            this.hud.message(`${s.name.toUpperCase()}: jammer spoofed a missile seeker!`, 'good');
+            this.audio.say('Seeker spoofed!');
+          } else if (e.side === me) {
+            this.hud.message('One of our missiles was jammed and lost lock.', 'ew');
+          }
+          this.audio.jamToggle(true);
           break;
         case 'contact':
           if (e.side === me && s) {
@@ -904,8 +975,17 @@ class Game {
     const state = this.state;
     if (!state) return;
 
-    this.visible =
-      this.mode === 'guest' ? computeVisibility(state.ships, this.side) : this.mode === 'menu' ? new Set(state.ships.map((s) => s.id)) : state.visible[this.side];
+    if (this.mode === 'guest') {
+      const sens = computeSensors(state.ships, this.side, state.time);
+      this.visible = sens.visible;
+      this.esm = sens.esm;
+    } else if (this.mode === 'menu') {
+      this.visible = new Set(state.ships.map((s) => s.id));
+      this.esm = new Map();
+    } else {
+      this.visible = state.visible[this.side];
+      this.esm = state.esm[this.side];
+    }
 
     if (this.mode === 'menu') this.updateAttract(dt);
     this.audio.muteVoice = this.mode === 'menu';
@@ -914,7 +994,8 @@ class Game {
     if (this.inBattle()) this.checkVampires();
 
     const t = state.time;
-    this.view.update(state, this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1), this.visible, this.side);
+    this.view.camPos = this.r.camera.position;
+    this.view.update(state, this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1), this.visible, this.side, this.selected);
     this.fx.listenerPos.copy(this.rig.target);
     this.fx.update(this.paused ? 0 : dt * (this.mode === 'sp' ? this.timeScale : 1));
     this.rig.shake = this.fx.shake;

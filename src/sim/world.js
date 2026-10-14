@@ -10,6 +10,7 @@ import {
   FLEETS,
   FORMATION,
   START_DISTANCE,
+  SENSORS,
 } from '../config.js';
 
 const TAU = Math.PI * 2;
@@ -40,24 +41,55 @@ export function radarRange(ship) {
   return CLASSES[ship.cls].radar * (ship.dmg && ship.dmg.radar ? 0.6 : 1);
 }
 
-// Which enemy ships can `side` see? Shared by host and guest.
-export function computeVisibility(ships, side) {
-  const vis = new Set();
+// Effective range at which radar ship `f` sees ship `e`.
+export function detectRange(f, e) {
+  let r = f.radar === false ? 0 : radarRange(f);
+  if (e.jammer && e.alive && r > 0) r = Math.max(r * SENSORS.jamFactor, Math.min(r, SENSORS.burnThrough));
+  return Math.max(r, SENSORS.visual);
+}
+
+// Is ship `e` radiating (radar or jammer)?
+export const emitting = (e) => e.alive && (e.radar !== false || e.jammer);
+
+// Smoothly drifting, deterministic ESM position estimate (same on host and guest).
+function esmEstimate(e, dist, time) {
+  const err = dist * SENSORS.esmError;
+  const a = Math.sin(time * 0.11 + e.id * 1.7) * Math.PI;
+  const m = (0.45 + 0.4 * Math.sin(time * 0.07 + e.id * 2.3)) * err;
+  return { x: e.x + Math.cos(a) * m, z: e.z + Math.sin(a) * m, err };
+}
+
+// What does `side` know about enemy ships?
+//  visible: Set of ids tracked by radar or eyes (exact position)
+//  esm: Map id -> {x, z, err, jam} passive bearing-only contacts (estimated)
+export function computeSensors(ships, side, time = 0) {
+  const visible = new Set();
+  const esm = new Map();
   for (const e of ships) {
     if (e.side === side) continue;
     if (!e.alive && e.sinkT > 40) continue;
+    let seen = false;
+    let heard = Infinity;
     for (const f of ships) {
       if (f.side !== side || !f.alive) continue;
-      const r = radarRange(f);
-      const dx = e.x - f.x;
-      const dz = e.z - f.z;
-      if (dx * dx + dz * dz < r * r) {
-        vis.add(e.id);
+      const d = Math.hypot(e.x - f.x, e.z - f.z);
+      if (d < detectRange(f, e)) {
+        seen = true;
         break;
       }
+      if (emitting(e)) {
+        const r = e.jammer ? SENSORS.jamEsm : radarRange(e) * SENSORS.esmFactor;
+        if (d < r) heard = Math.min(heard, d);
+      }
     }
+    if (seen) visible.add(e.id);
+    else if (heard < Infinity && e.alive) esm.set(e.id, { ...esmEstimate(e, heard, time), jam: !!e.jammer });
   }
-  return vis;
+  return { visible, esm };
+}
+
+export function computeVisibility(ships, side, time = 0) {
+  return computeSensors(ships, side, time).visible;
 }
 
 export class World {
@@ -72,6 +104,7 @@ export class World {
     this.nextId = 1;
     this.winner = null;
     this.visible = { blue: new Set(), red: new Set() };
+    this.esm = { blue: new Map(), red: new Map() };
     this.stats = {
       blue: { ssmFired: 0, ssmHits: 0, intercepts: 0, shellHits: 0, sunk: 0 },
       red: { ssmFired: 0, ssmHits: 0, intercepts: 0, shellHits: 0, sunk: 0 },
@@ -133,6 +166,8 @@ export class World {
       turn: 0,
       fires: [],
       dmg: { radar: false, engine: false, gun: false },
+      radar: true,
+      jammer: false,
     };
     this.ships.push(s);
     this.byId.set(s.id, s);
@@ -205,7 +240,8 @@ export class World {
       }
       case 'fire': {
         const t = this.byId.get(cmd.target);
-        if (!t || t.side === side || !t.alive || !this.visible[side].has(t.id)) break;
+        if (!t || t.side === side || !t.alive) break;
+        if (!this.visible[side].has(t.id) && !this.esm[side].has(t.id)) break;
         let count = clamp(cmd.count | 0, 1, 32);
         const shooters = ships
           .filter((s) => Math.hypot(s.x - t.x, s.z - t.z) < WEAPONS.ssm.range)
@@ -228,6 +264,20 @@ export class World {
       }
       case 'chaff':
         for (const s of ships) this.deployChaff(s);
+        break;
+      case 'radar':
+        for (const s of ships) {
+          if (s.radar === !!cmd.on) continue;
+          s.radar = !!cmd.on;
+          this.emit({ t: 'emcon', s: s.id, on: s.radar });
+        }
+        break;
+      case 'jammer':
+        for (const s of ships) {
+          if (s.jammer === !!cmd.on) continue;
+          s.jammer = !!cmd.on;
+          this.emit({ t: 'jam', s: s.id, on: s.jammer });
+        }
         break;
       default:
         break;
@@ -257,14 +307,20 @@ export class World {
     this.time += dt;
 
     for (const side of ['blue', 'red']) {
-      const vis = computeVisibility(this.ships, side);
-      for (const id of vis) {
+      const { visible, esm } = computeSensors(this.ships, side, this.time);
+      for (const id of visible) {
         if (!this.visible[side].has(id)) {
           const s = this.byId.get(id);
           if (s.alive) this.emit({ t: 'contact', side, s: id });
         }
       }
-      this.visible[side] = vis;
+      for (const [id, c] of esm) {
+        const old = this.esm[side].get(id);
+        if (!old && !this.visible[side].has(id)) this.emit({ t: 'esm', side, s: id, jam: c.jam });
+        else if (old && c.jam && !old.jam) this.emit({ t: 'esm', side, s: id, jam: true });
+      }
+      this.visible[side] = visible;
+      this.esm[side] = esm;
     }
 
     for (const s of this.ships) this.stepShip(s, dt);
@@ -400,6 +456,8 @@ export class World {
     }
     s.ssm--;
     s.launchCd = 0.45;
+    // Aim at the radar track, or at the ESM estimate when firing on a bearing.
+    const est = this.visible[s.side].has(t.id) ? t : this.esm[s.side].get(t.id) || t;
     const cell = c.vls[(c.ssm - s.ssm) % c.vls.length];
     const canister = s.cls === 'fac';
     const side = (c.ssm - s.ssm) % 2 ? 1 : -1;
@@ -416,8 +474,8 @@ export class World {
       pitch: canister ? 0.3 : 1.4,
       speed: canister ? 60 : 30,
       targetId: t.id,
-      tx: t.x,
-      tz: t.z,
+      tx: est.x,
+      tz: est.z,
       fuel: WEAPONS.ssm.range * 1.15,
       age: 0,
       alive: true,
@@ -532,7 +590,8 @@ export class World {
 
   stepAirDefense(s, c, dt) {
     // SAM: area defence against any hostile anti-ship missile in range.
-    if (s.sam > 0 && s.samCd <= 0) {
+    // SAM: needs the ship's own fire-control radar.
+    if (s.sam > 0 && s.samCd <= 0 && s.radar) {
       let best = null;
       let bestD = Infinity;
       for (const m of this.missiles) {
@@ -618,6 +677,7 @@ export class World {
       }
       tgt = best;
       m.targetId = best ? best.id : 0;
+      m.locked = false;
     }
     let ax = m.tx;
     let az = m.tz;
@@ -629,9 +689,20 @@ export class World {
       }
     } else if (m.decoy === 0 && tgt && tgt.alive) {
       const dist = Math.hypot(tgt.x - m.x, tgt.z - m.z);
-      const lead = Math.min(dist / W.speed, 8) * 0.8;
-      m.tx = tgt.x + Math.sin(tgt.heading) * tgt.speed * lead;
-      m.tz = tgt.z + Math.cos(tgt.heading) * tgt.speed * lead;
+      const seeker = tgt.jammer ? SENSORS.seekerJammed : SENSORS.seeker;
+      const tracked = this.visible[m.side].has(tgt.id);
+      if (dist < seeker && !m.locked) {
+        m.locked = true;
+        if (tgt.jammer && Math.random() < SENSORS.breakLock) {
+          m.decoy = -1; // seeker blinded by the jammer
+          this.emit({ t: 'jammed', s: tgt.id, m: m.id, x: m.x, y: m.y, z: m.z, side: m.side });
+        }
+      }
+      if (m.decoy === 0 && (tracked || m.locked)) {
+        const lead = Math.min(dist / W.speed, 8) * 0.8;
+        m.tx = tgt.x + Math.sin(tgt.heading) * tgt.speed * lead;
+        m.tz = tgt.z + Math.cos(tgt.heading) * tgt.speed * lead;
+      }
       ax = m.tx;
       az = m.tz;
     }
@@ -639,7 +710,7 @@ export class World {
     const dx = ax - m.x;
     const dz = az - m.z;
     const dist = Math.hypot(dx, dz);
-    if (m.decoy === 0 && !tgt && dist < 60) m.decoy = -1; // nothing left to home on
+    if (m.decoy === 0 && !m.locked && dist < 60) m.decoy = -1; // reached the aim point with nothing to home on
     const terminal = dist < W.terminalRange;
     if (m.decoy !== -1) {
       let desired = Math.atan2(dx, dz);
@@ -818,7 +889,7 @@ export class World {
         s.chaff,
         r3(s.gunAim),
         s.fires.map((f) => [r1(f.lx), r1(f.lz)]),
-        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0),
+        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0) | (s.radar ? 0 : 8) | (s.jammer ? 16 : 0),
         s.target || 0,
         s.throttle,
         s.waypoints.map((w) => [r1(w.x), r1(w.z)]),

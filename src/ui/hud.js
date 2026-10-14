@@ -112,6 +112,8 @@ export class Hud {
       const st = [];
       if (!s.alive) st.push('SINKING');
       else {
+        if (s.radar === false) st.push('SILENT');
+        if (s.jammer) st.push('JAM');
         if (s.fires && s.fires.length) st.push('FIRE');
         if (s.dmg.radar) st.push('RADAR');
         if (s.dmg.engine) st.push('ENG');
@@ -134,7 +136,10 @@ export class Hud {
     const ssm = sel.reduce((a, s) => a + s.ssm, 0);
     const chaff = sel.reduce((a, s) => a + s.chaff, 0);
     const chaffReady = sel.some((s) => s.chaff > 0 && !(s.chaffCd > 0));
-    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode].join('|');
+    const radarOn = sel.every((s) => s.radar !== false);
+    const radarMixed = !radarOn && sel.some((s) => s.radar !== false);
+    const jamOn = sel.length > 0 && sel.every((s) => s.jammer);
+    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, radarOn, radarMixed, jamOn].join('|');
     if (key === this.ordersKey) return;
     this.ordersKey = key;
     if (!sel.length) {
@@ -153,6 +158,10 @@ export class Hud {
       <div class="ttl"><span>${title}</span><span>${sub}</span></div>
       <div class="grp"><span class="lbl">SPEED</span>${speedBtns}</div>
       <div class="grp"><span class="lbl">SALVO</span>${salvoBtns}</div>
+      <div class="grp sensors"><span class="lbl">SENSOR</span>
+        <button class="radar ${radarOn ? 'on' : radarMixed ? 'mixed' : 'off'}" data-act="radar" title="Radar active: you see far and SAMs work, but enemy ESM hears you. Silent: hidden, but SAMs are offline.">[B] RADAR ${radarOn ? 'ACTIVE' : radarMixed ? 'MIXED' : 'SILENT'}</button>
+        <button class="jam ${jamOn ? 'on' : ''}" data-act="jam" title="Jammer: shrinks enemy radar range and can spoof missile seekers, but enemy ESM hears it from far away.">[J] JAMMER ${jamOn ? 'ON' : 'OFF'}</button>
+      </div>
       <div class="grp">
         <button class="fire ${g.fireMode ? 'on' : ''}" data-act="fire" ${ssm ? '' : 'disabled'}>[F] FIRE SSM ${ssm}</button>
         <button class="danger" data-act="chaff" ${chaffReady ? '' : 'disabled'}>[G] CHAFF ${chaff}</button>
@@ -165,6 +174,8 @@ export class Hud {
         else if (b.dataset.salvo) g.setSalvo(+b.dataset.salvo);
         else if (b.dataset.act === 'fire') g.toggleFireMode();
         else if (b.dataset.act === 'chaff') g.chaff();
+        else if (b.dataset.act === 'radar') g.toggleRadar();
+        else if (b.dataset.act === 'jam') g.toggleJammer();
       });
     });
   }

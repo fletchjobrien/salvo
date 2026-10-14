@@ -28,7 +28,7 @@ const BLUR_FRAG = /* glsl */ `
 const FINAL_FRAG = /* glsl */ `
   uniform sampler2D tColor, tDepth, tBloom1, tBloom2;
   uniform vec2 res;
-  uniform float near, far, levels, bloomStr, exposure, time, vignette, flash, damage;
+  uniform float near, far, levels, ditherAmt, bloomStr, exposure, time, vignette, flash, damage;
   uniform vec3 flashColor;
   varying vec2 vUv;
   const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
@@ -71,7 +71,7 @@ const FINAL_FRAG = /* glsl */ `
 
     // ordered dither + quantise
     int bi = int(mod(px.x, 4.0)) + int(mod(px.y, 4.0)) * 4;
-    float b = BAYER[bi] / 16.0 - 0.5;
+    float b = (BAYER[bi] / 16.0 - 0.5) * ditherAmt;
     c = floor(c * levels + 0.5 + b) / levels;
     gl_FragColor = vec4(c, 1.0);
   }`;
@@ -133,7 +133,8 @@ export class Renderer {
         res: { value: new THREE.Vector2(1, 1) },
         near: { value: this.camera.near },
         far: { value: this.camera.far },
-        levels: { value: 22 },
+        levels: { value: 36 },
+        ditherAmt: { value: 0.6 },
         bloomStr: { value: 0.45 },
         exposure: { value: 1 },
         time: { value: 0 },
@@ -153,6 +154,15 @@ export class Renderer {
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // 'soft' (default), 'retro' (strong banding + dither) or 'clean'.
+  setFilter(mode) {
+    const u = this.finalMat.uniforms;
+    const presets = { soft: [36, 0.6], retro: [18, 1.0], clean: [255, 0.0] };
+    const [levels, dither] = presets[mode] || presets.soft;
+    u.levels.value = levels;
+    u.ditherAmt.value = dither;
   }
 
   setPixelScale(s) {

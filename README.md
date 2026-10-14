@@ -13,6 +13,8 @@ The game runs fully in the browser (Three.js + WebAudio). A Cloudflare Worker se
 | Right click enemy | Designate gun target |
 | **F**, then click enemy | Launch an anti-ship missile salvo (Z / X / C = 2 / 4 / 6 missiles) |
 | **G** | Fire chaff decoys at incoming missiles |
+| **B** | Radar active / silent (EMCON) |
+| **J** | Jammer on / off |
 | `[` `]` or R / V, Backspace | Speed down / up, all stop |
 | 1–4, `` ` `` | Select a ship / the whole fleet (double-tap to jump the camera) |
 | H, double-click, Tab | Follow a ship |
@@ -20,6 +22,14 @@ The game runs fully in the browser (Three.js + WebAudio). A Cloudflare Worker se
 | WASD / arrows, Q / E, wheel | Pan, rotate, zoom (right-drag or middle-drag also rotates) |
 | Space, T | Pause, time compression (vs AI only) |
 | ? | Command reference |
+
+### Radar and electronic warfare
+
+- **Radar active**: you track enemy ships at long range and your SAMs work. Enemy ESM (passive receivers) can hear your radar from 1.6 times its range.
+- **Radar silent**: the enemy cannot hear you, but your SAMs go offline and you see only to the horizon (lookouts, about 1.3 km). Other ships in your group still share what their radars see.
+- **ESM contacts** show as amber "?" symbols with a bearing line and an uncertainty circle. You can fire missiles at them; the missile flies to the estimate and its seeker searches for the real ship.
+- **Jammer**: enemy radars see a jamming ship at about half range (they burn through at 1.5 km). Missile seekers have a shorter lock range against it and can lose lock. A jammer is heard from 9 km away, so use it when missiles are inbound.
+- The AI starts silent and turns its radar on when it detects you.
 
 Each side gets a standard task group: one destroyer, two frigates and one missile boat. SAMs and CIWS shoot down incoming missiles automatically. Large salvos saturate the defenses, and small salvos usually get shot down.
 

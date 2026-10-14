@@ -91,6 +91,19 @@ export const WEAPONS = {
   chaff: { seduce: 0.4, radius: 1500, life: 7, cooldown: 9 },
 };
 
+// Sensors and electronic warfare.
+export const SENSORS = {
+  visual: 1300, // lookouts / IR: always works, radar or not
+  esmFactor: 1.6, // passive ESM hears a radar this many times its own range
+  jamEsm: 9000, // a jammer is heard from very far away
+  jamFactor: 0.55, // jamming shrinks enemy radar range to this fraction...
+  burnThrough: 1500, // ...but never below this (radar burns through)
+  esmError: 0.12, // ESM position error as a fraction of distance
+  seeker: 1700, // missile seeker acquisition range
+  seekerJammed: 950, // seeker range against a jamming target
+  breakLock: 0.22, // chance a jammer breaks a seeker's lock once it acquires
+};
+
 export const FLEETS = {
   blue: {
     name: 'Coalition Task Group',
@@ -124,8 +137,13 @@ export const START_DISTANCE = 6400;
 
 // Ocean waves. Shared by the GPU shader and the CPU (ship bobbing).
 export const WAVES = [
-  { dir: [1.0, 0.35], amp: 0.95, len: 150 },
-  { dir: [0.55, 1.0], amp: 0.55, len: 86 },
-  { dir: [-0.45, 1.0], amp: 0.36, len: 47 },
-  { dir: [1.0, -0.75], amp: 0.22, len: 27 },
+  // Several trains with unrelated wavelengths and directions so the swell
+  // never forms a visible repeating pattern.
+  { dir: [1.0, 0.35], amp: 0.72, len: 151 },
+  { dir: [0.55, 1.0], amp: 0.44, len: 97 },
+  { dir: [-0.45, 1.0], amp: 0.3, len: 61 },
+  { dir: [1.0, -0.75], amp: 0.2, len: 43 },
+  { dir: [-0.9, 0.3], amp: 0.15, len: 33 },
+  { dir: [0.2, -1.0], amp: 0.11, len: 23.7 },
+  { dir: [0.8, 0.9], amp: 0.08, len: 17.3 },
 ];

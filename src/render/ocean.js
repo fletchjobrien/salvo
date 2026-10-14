@@ -75,19 +75,20 @@ export function createOcean(env) {
         f = f * f * (3.0 - 2.0 * f);
         return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
       }
-      // Extra wave octaves for the normal only. Each fades out once it is
-      // smaller than a few pixels, which kills shimmering moire.
-      vec2 detail(vec2 p, float t, float dist) {
+      // Extra wave octaves for the normal only. Each octave fades out
+      // before it gets smaller than ~4 screen pixels (fp = world units per
+      // pixel), so nothing shimmers or crawls.
+      vec2 detail(vec2 p, float t, float fp) {
         vec2 g = vec2(0.0);
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 8; i++) {
           float fi = float(i);
           float ang = fi * 2.399 + 0.6;
           vec2 dir = vec2(cos(ang), sin(ang));
-          float len = 34.0 * pow(0.74, fi);
+          float len = 30.0 * pow(0.72, fi);
           float k = 6.2831 / len;
           float w = sqrt(9.8 * k);
-          float a = 0.07 * len / 15.0;
-          float fade = 1.0 - smoothstep(len * 6.0, len * 22.0, dist);
+          float a = 0.05 * len / 15.0;
+          float fade = 1.0 - smoothstep(len * 0.12, len * 0.3, fp);
           g += dir * (a * k * fade) * cos(k * dot(dir, p) - w * t + fi * 4.1);
         }
         return g;
@@ -96,8 +97,9 @@ export function createOcean(env) {
         vec3 toCam = cameraPosition - vWorld;
         float dist = length(toCam);
         vec3 V = toCam / dist;
-        vec2 g = waveGrad(vWorld.xz, time) * (0.35 + 0.65 * (1.0 - smoothstep(1500.0, 6000.0, dist)));
-        g += detail(vWorld.xz, time, dist);
+        float fp = length(fwidth(vWorld.xz));
+        vec2 g = waveGradAA(vWorld.xz, time, fp);
+        g += detail(vWorld.xz, time, fp);
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
 
         float ndv = max(dot(N, V), 0.0);
@@ -105,24 +107,28 @@ export function createOcean(env) {
         vec3 R = reflect(-V, N);
         R.y = abs(R.y);
         vec3 sky = mix(horizon, zenith, pow(R.y, 0.5));
-        sky += sunColor * pow(max(dot(R, sunDir), 0.0), 10.0) * 0.6;
+        sky += sunColor * pow(max(dot(R, sunDir), 0.0), 8.0) * 0.45;
 
         float diff = max(dot(N, sunDir), 0.0);
-        float crest = clamp(vH * 0.35 + 0.45, 0.0, 1.0);
+        float crest = clamp(vH * 0.22 + 0.5, 0.0, 1.0);
         float sss = pow(max(dot(V, -vec3(sunDir.x, 0.0, sunDir.z)), 0.0), 3.0) * crest;
-        vec3 body = deep * (0.35 + 0.65 * diff) + scatter * (crest * 0.55 + sss * 0.9) * (0.4 + 0.6 * diff);
-        vec3 col = mix(body, sky, fres * 0.85);
+        vec3 body = deep * (0.45 + 0.55 * diff) + scatter * (crest * 0.4 + sss * 0.7) * (0.5 + 0.5 * diff);
+        vec3 col = mix(body, sky, min(fres, 0.8) * 0.85);
 
+        // Sun glitter: broader and softer as pixels cover more sea, with the
+        // peak kept low so it shimmers gently instead of strobing.
+        float rough = smoothstep(0.3, 6.0, fp);
+        float pw = mix(260.0, 24.0, rough);
         float sd = max(dot(R, sunDir), 0.0);
-        col += sunColor * (pow(sd, 900.0) * 9.0 + pow(sd, 90.0) * 0.5);
+        col += sunColor * (pow(sd, pw) * mix(2.2, 0.6, rough) + pow(sd, 40.0) * 0.18);
 
-        // whitecaps: small broken patches only on the highest crests
+        // whitecaps: rare, soft, only where they are several pixels big
         float hn = vH / 2.0;
-        float n1 = noise(vWorld.xz * 0.08 + time * 0.05);
-        float n2 = noise(vWorld.xz * 0.35 - time * 0.1);
-        float foam = smoothstep(0.62, 0.95, hn + (n1 - 0.5) * 0.5) * smoothstep(0.45, 0.8, n2);
-        foam *= 1.0 - smoothstep(500.0, 1800.0, dist);
-        col = mix(col, foamColor * (0.5 + 0.5 * diff), foam * 0.8);
+        float n1 = noise(vWorld.xz * 0.06 + time * 0.04);
+        float n2 = noise(vWorld.xz * 0.21 - time * 0.07);
+        float foam = smoothstep(0.7, 1.0, hn + (n1 - 0.5) * 0.4) * smoothstep(0.5, 0.85, n2);
+        foam *= 1.0 - smoothstep(0.6, 2.5, fp);
+        col = mix(col, foamColor * (0.55 + 0.35 * diff), foam * 0.55);
 
         float f = 1.0 - exp(-pow(dist * fogDensity, 2.0));
         col = mix(col, fogColor, f);

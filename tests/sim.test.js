@@ -39,7 +39,7 @@ for (let r = 0; r < runs; r++) {
 console.log('events', evCount);
 console.log('totals', totals, `avg battle ${(totalTime / runs).toFixed(0)}s`);
 
-const need = ['launch', 'gun', 'hit', 'splash', 'intercept', 'sink', 'contact', 'end', 'ciws'];
+const need = ['launch', 'gun', 'hit', 'splash', 'intercept', 'sink', 'contact', 'end', 'ciws', 'esm', 'emcon', 'jam'];
 const missing = need.filter((k) => !evCount[k]);
 if (missing.length) {
   console.error('FAIL: events never fired:', missing);

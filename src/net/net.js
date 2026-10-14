@@ -104,6 +104,8 @@ export class Mirror {
         turn: 0,
         launchQueue: [],
         chaffCd: 0,
+        radar: true,
+        jammer: false,
       };
       this.ships.push(ship);
       this.byId.set(s.id, ship);
@@ -161,6 +163,8 @@ export class Mirror {
       s.gunAim = lerpAng(A[11], B[11], t);
       s.fires = B[12].map(([lx, lz]) => ({ lx, lz }));
       s.dmg = { radar: !!(B[13] & 1), engine: !!(B[13] & 2), gun: !!(B[13] & 4) };
+      s.radar = !(B[13] & 8);
+      s.jammer = !!(B[13] & 16);
       s.target = B[14] || null;
       s.throttle = B[15];
       s.waypoints = B[16].map(([x, z]) => ({ x, z }));

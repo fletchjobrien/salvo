@@ -338,6 +338,78 @@ export class Audio {
     this.blip(220, 0.12, 'sawtooth', 0.1);
   }
 
+  // Radar spinning up (rising sweep) or going dark (falling).
+  radarToggle(on) {
+    if (!this.ctx || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(on ? 400 : 1600, t);
+    o.frequency.exponentialRampToValueAtTime(on ? 1600 : 300, t + 0.35);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.18, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 0.5);
+    if (on) setTimeout(() => this.blip(2400, 0.05, 'sine', 0.12), 380);
+  }
+
+  // Jammer static burst.
+  jamToggle(on) {
+    if (!this.ctx || !this.enabled || !this.can('jam', 0.25)) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const n = this.noise();
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 2200;
+    f.Q.value = 0.7;
+    const am = ctx.createGain();
+    am.gain.value = 0;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'square';
+    lfo.frequency.value = 23;
+    const lg = ctx.createGain();
+    lg.gain.value = 0.5;
+    lfo.connect(lg).connect(am.gain);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(on ? 0.22 : 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (on ? 0.6 : 0.25));
+    n.connect(f).connect(am).connect(g).connect(this.master);
+    n.start(t);
+    lfo.start(t);
+    n.stop(t + 0.7);
+    lfo.stop(t + 0.7);
+  }
+
+  // Passive intercept: a warbling detector tone.
+  esm() {
+    if (!this.ctx || !this.enabled || !this.can('esm', 1.5)) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = 1150;
+    const w = ctx.createOscillator();
+    w.frequency.value = 14;
+    const wg = ctx.createGain();
+    wg.gain.value = 180;
+    w.connect(wg).connect(o.frequency);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.05);
+    g.gain.setValueAtTime(0.12, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    w.start(t);
+    o.stop(t + 0.85);
+    w.stop(t + 0.85);
+  }
+
   alarm() {
     if (!this.can('alarm', 3)) return;
     for (let i = 0; i < 3; i++) {

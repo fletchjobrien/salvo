@@ -15,6 +15,8 @@ export class AIController {
     this.chaffReact = new Map();
     this.flank = Math.random() < 0.5 ? -1 : 1;
     this.lastSeen = null;
+    this.started = false;
+    this.jamUntil = new Map();
   }
 
   cmd(c) {
@@ -34,7 +36,28 @@ export class AIController {
     if (!mine.length) return;
     const ids = mine.map((s) => s.id);
     const vis = w.visible[this.side];
-    const enemies = w.ships.filter((s) => s.side === enemyOf(this.side) && s.alive && vis.has(s.id));
+    const esm = w.esm[this.side];
+    // Radar tracks are exact; ESM contacts only give an estimated position.
+    const enemies = [];
+    for (const s of w.ships) {
+      if (s.side !== enemyOf(this.side) || !s.alive) continue;
+      if (vis.has(s.id)) enemies.push(s);
+      else if (esm.has(s.id)) {
+        const e = esm.get(s.id);
+        enemies.push({ ...s, x: e.x, z: e.z, esm: true });
+      }
+    }
+
+    // EMCON: sneak in with radars dark, light up once we know where they are.
+    if (!this.started) {
+      this.started = true;
+      this.cmd({ type: 'radar', ships: ids, on: false });
+    } else if (mine.some((s) => !s.radar)) {
+      const threatened = w.missiles.some((m) => m.side !== this.side && m.kind === 'ssm');
+      const hurt = mine.some((s) => s.hp < s.maxHp);
+      const close = enemies.some((e) => mine.some((s) => Math.hypot(e.x - s.x, e.z - s.z) < 5200));
+      if (threatened || hurt || close || vis.size) this.cmd({ type: 'radar', ships: ids, on: true });
+    }
 
     const cx = mine.reduce((a, s) => a + s.x, 0) / mine.length;
     const cz = mine.reduce((a, s) => a + s.z, 0) / mine.length;
@@ -112,6 +135,19 @@ export class AIController {
 
   updateChaff(dt) {
     const w = this.world;
+    // Jammers: switch on when missiles come for a ship, off once it's quiet.
+    for (const s of w.ships) {
+      if (s.side !== this.side || !s.alive) continue;
+      const inbound = w.missiles.some(
+        (m) => m.kind === 'ssm' && m.side !== this.side && m.targetId === s.id && Math.hypot(m.x - s.x, m.z - s.z) < 4000,
+      );
+      if (inbound) {
+        this.jamUntil.set(s.id, w.time + 20);
+        if (!s.jammer && Math.random() < dt * 1.5 * this.difficulty) this.cmd({ type: 'jammer', ships: [s.id], on: true });
+      } else if (s.jammer && w.time > (this.jamUntil.get(s.id) || 0)) {
+        this.cmd({ type: 'jammer', ships: [s.id], on: false });
+      }
+    }
     for (const s of w.ships) {
       if (s.side !== this.side || !s.alive || s.chaff <= 0 || s.chaffCd > 0) continue;
       const threat = w.missiles.some(
