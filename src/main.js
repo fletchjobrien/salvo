@@ -474,7 +474,15 @@ class Game {
 
   toggleHelp(v) {
     $('help').classList.toggle('hidden', !v);
-    if (v && this.mode === 'sp') this.paused = true;
+    if (this.mode === 'sp') {
+      if (v) {
+        this.pausedByHelp = !this.paused;
+        this.paused = true;
+      } else if (this.pausedByHelp) {
+        this.paused = false;
+        this.pausedByHelp = false;
+      }
+    }
   }
 
   bindInput() {

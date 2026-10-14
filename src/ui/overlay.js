@@ -355,7 +355,16 @@ export class Overlay {
     const W = this.mini.width / this.dpr;
     const H = this.mini.height / this.dpr;
     const v = this.miniView;
-    return { x: v.cx - (px - W / 2) / v.scale, z: v.cz - (py - H / 2) / v.scale };
+    const a = (px - W / 2) / v.scale;
+    const b = (H / 2 - py) / v.scale;
+    const { rx, rz, fx, fz } = this.miniAxes();
+    return { x: v.cx + rx * a + fx * b, z: v.cz + rz * a + fz * b };
+  }
+
+  // Minimap is drawn camera-up so it always matches the 3D view.
+  miniAxes() {
+    const y = this.yaw || 0;
+    return { rx: Math.cos(y), rz: -Math.sin(y), fx: -Math.sin(y), fz: -Math.cos(y) };
   }
 
   drawMinimap(g) {
@@ -390,29 +399,35 @@ export class Overlay {
     v.cx += ((minX + maxX) / 2 - v.cx) * k;
     v.cz += ((minZ + maxZ) / 2 - v.cz) * k;
     v.scale += (Math.min(W, H) / span - v.scale) * k;
-    // Map is drawn north-up with +z up; mirror x so it matches the default view.
-    const P = (x, z) => [W / 2 - (x - v.cx) * v.scale, H / 2 - (z - v.cz) * v.scale];
+    this.yaw = g.rig.yaw;
+    const { rx, rz, fx, fz } = this.miniAxes();
+    const P = (x, z) => {
+      const dx = x - v.cx;
+      const dz = z - v.cz;
+      return [W / 2 + (dx * rx + dz * rz) * v.scale, H / 2 - (dx * fx + dz * fz) * v.scale];
+    };
 
-    // grid
+    // grid (rotates with the map)
     ctx.strokeStyle = 'rgba(98,216,255,0.08)';
     ctx.lineWidth = 1;
     const step = 1000;
-    const x0 = Math.floor((v.cx - W / v.scale) / step) * step;
-    const z0 = Math.floor((v.cz - H / v.scale) / step) * step;
-    for (let x = x0; x < v.cx + W / v.scale; x += step) {
-      const [px] = P(x, 0);
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px, H);
-      ctx.stroke();
+    const R = Math.max(W, H) / v.scale;
+    const gx0 = Math.floor((v.cx - R) / step) * step;
+    const gz0 = Math.floor((v.cz - R) / step) * step;
+    ctx.beginPath();
+    for (let x = gx0; x <= v.cx + R; x += step) {
+      const [ax, ay] = P(x, v.cz - R);
+      const [bx, by] = P(x, v.cz + R);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
     }
-    for (let z = z0; z < v.cz + H / v.scale; z += step) {
-      const [, py] = P(0, z);
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(W, py);
-      ctx.stroke();
+    for (let z = gz0; z <= v.cz + R; z += step) {
+      const [ax, ay] = P(v.cx - R, z);
+      const [bx, by] = P(v.cx + R, z);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
     }
+    ctx.stroke();
 
     // radar coverage
     for (const s of g.state.ships) {
@@ -455,28 +470,22 @@ export class Overlay {
         ctx.lineTo(px + 4, py);
       }
       ctx.stroke();
+      const [hx, hy] = P(s.x + Math.sin(s.heading) * 7 / v.scale, s.z + Math.cos(s.heading) * 7 / v.scale);
       ctx.beginPath();
       ctx.moveTo(px, py);
-      ctx.lineTo(px - Math.sin(s.heading) * 7, py - Math.cos(s.heading) * 7);
+      ctx.lineTo(hx, hy);
       ctx.stroke();
     }
-    // camera
+    // camera: view wedge always points up
     const t = g.rig.target;
     const [cx, cy] = P(t.x, t.z);
-    const yaw = g.rig.yaw;
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    const fx = Math.sin(yaw + Math.PI);
-    const fz = Math.cos(yaw + Math.PI);
-    for (const da of [-0.45, 0.45]) {
-      const ax = Math.sin(yaw + Math.PI + da);
-      const az = Math.cos(yaw + Math.PI + da);
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx - ax * 14, cy - az * 14);
-    }
+    ctx.moveTo(cx - 10, cy - 14);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + 10, cy - 14);
     ctx.stroke();
-    ctx.strokeRect(cx - 2 - fx * 0, cy - 2 - fz * 0, 4, 4);
+    ctx.strokeRect(cx - 2, cy - 2, 4, 4);
   }
 }
