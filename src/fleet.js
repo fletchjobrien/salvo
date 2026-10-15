@@ -1,35 +1,41 @@
 // Fleet design: hulls, fittable modules, points budget and the function
 // that turns a design into the stats the simulation uses.
-import { CLASSES } from './config.js';
+import { CLASSES, MISSILE_TYPES, GUN_TYPES, RADAR_TYPES, JAMMER_TYPES } from './config.js';
 
 export const BUDGET = 1400;
 export const MAX_SHIPS = 6;
 
 export const HULLS = {
-  fac: { name: 'Corvette', size: 'Small', cost: 60, slots: 4, blurb: 'Fast, cheap and fragile. A missile carrier for wolfpacks.' },
-  ffg: { name: 'Frigate', size: 'Medium', cost: 120, slots: 6, blurb: 'Balanced escort. Good speed with room for a real loadout.' },
-  ddg: { name: 'Destroyer', size: 'Large', cost: 200, slots: 8, blurb: 'Big, tough flagship hull. Slow to turn, carries the most.' },
+  fac: { name: 'Corvette', size: 'Small', cost: 70, slots: 2, blurb: 'Fast, cheap and fragile. Two slots: pick a job.' },
+  ffg: { name: 'Frigate', size: 'Medium', cost: 140, slots: 4, blurb: 'Balanced escort with room for a real loadout.' },
+  ddg: { name: 'Destroyer', size: 'Large', cost: 220, slots: 6, blurb: 'Big, tough flagship hull. Slow to turn, carries the most.' },
 };
 
 // Every module fills one slot.
 export const MODULES = {
-  ssm: { name: 'Anti-Ship Missiles', short: 'SSM ×4', cat: 'weapons', cost: 50, desc: '+4 sea-skimming anti-ship missiles.' },
-  gun: { name: 'Naval Gun', short: 'GUN', cat: 'weapons', cost: 30, desc: 'Fits a main gun. Each extra one fires 35% faster.' },
-  sam: { name: 'SAM Cells', short: 'SAM ×6', cat: 'defense', cost: 45, desc: '+6 area air-defence missiles. Needs radar on.' },
-  ciws: { name: 'CIWS Mount', short: 'CIWS', cat: 'defense', cost: 30, desc: 'Last-ditch gatling gun against missiles.' },
-  chaff: { name: 'Decoy Launcher', short: 'CHAFF ×3', cat: 'defense', cost: 10, desc: '+3 chaff salvos to seduce missiles.' },
-  armor: { name: 'Armour Belt', short: 'ARMOUR', cat: 'defense', cost: 35, desc: '+30% hull strength.' },
-  radar: { name: 'Long-Range Radar', short: 'RADAR+', cat: 'sensors', cost: 30, desc: '+35% radar range (also louder on enemy ESM).', unique: true },
-  esm: { name: 'ESM Suite', short: 'ESM+', cat: 'sensors', cost: 20, desc: 'Hears enemy radars and jammers 40% farther away.', unique: true },
-  jammer: { name: 'Jammer', short: 'JAMMER', cat: 'sensors', cost: 40, desc: 'Allows jamming: shrinks enemy radar range, spoofs seekers.', unique: true },
-  engine: { name: 'Gas Turbines', short: 'ENGINE', cat: 'mobility', cost: 20, desc: '+12% top speed and acceleration.' },
+  skimmer: { name: 'Sea-Skimmer Battery', short: 'SKIMMER ×4', cat: 'missiles', cost: 55, desc: '4 subsonic missiles that hug the waves and weave at the end. 4.2 km.' },
+  supersonic: { name: 'Supersonic Battery', short: 'SUPERSONIC ×2', cat: 'missiles', cost: 65, desc: '2 very fast missiles. Hard to shoot down, hit hard. 3.3 km.' },
+  cruise: { name: 'Cruise Battery', short: 'CRUISE ×2', cat: 'missiles', cost: 60, desc: '2 long-range missiles. Fly high, then dive. Easier to intercept. 7.5 km.' },
+  autocannon: { name: '57mm Autocannon', short: '57MM', cat: 'guns', cost: 25, desc: 'Rapid fire, short range. Also shoots down nearby missiles.' },
+  naval: { name: '127mm Naval Gun', short: '127MM', cat: 'guns', cost: 35, desc: 'Steady medium-range gun. 1.7 km.' },
+  railgun: { name: 'Railgun', short: 'RAILGUN', cat: 'guns', cost: 60, desc: 'Slow-firing, flat, devastating hits out to 3.2 km.' },
+  sam: { name: 'SAM Battery', short: 'SAM ×8', cat: 'defense', cost: 50, desc: '8 interceptors for area defence. Needs radar on and unjammed.' },
+  ciws: { name: 'CIWS Turret', short: 'CIWS', cat: 'defense', cost: 30, desc: 'Last-ditch gatling gun. Works even when jammed.' },
+  laser: { name: 'Point-Defence Laser', short: 'LASER', cat: 'defense', cost: 50, desc: 'Burns down missiles inside 700 m. Never runs dry.' },
+  decoy: { name: 'Decoy Launcher', short: 'DECOYS', cat: 'defense', cost: 15, desc: '+4 chaff salvos to pull missiles away.' },
+  search: { name: 'Search Radar', short: 'SEARCH', cat: 'sensors', cost: 40, desc: '5.2 km range, pings every 3 s. Identifies inside 2 km.', unique: true },
+  early: { name: 'Early-Warning Radar', short: 'EARLY WARN', cat: 'sensors', cost: 55, desc: '8 km range, slow pings. Mostly unknown blips. Loud.', unique: true },
+  fire: { name: 'Fire-Control Radar', short: 'FIRE CTRL', cat: 'sensors', cost: 35, desc: '3.6 km, pings every second and identifies everything it sees.', unique: true },
+  noise: { name: 'Noise Jammer', short: 'NOISE JAM', cat: 'ew', cost: 45, desc: 'Cast a narrow 7 km cone: blinds radars and seekers for 10 s.', unique: true },
+  barrage: { name: 'Barrage Jammer', short: 'BARRAGE JAM', cat: 'ew', cost: 45, desc: 'Cast a wide 4 km cone: blinds radars and seekers for 8 s.', unique: true },
 };
 
 export const CATEGORIES = [
-  ['weapons', 'Weapons'],
+  ['missiles', 'Missile Batteries'],
+  ['guns', 'Guns'],
   ['defense', 'Defence'],
-  ['sensors', 'Sensors & EW'],
-  ['mobility', 'Mobility'],
+  ['sensors', 'Radar Arrays'],
+  ['ew', 'Jammer Arrays'],
 ];
 
 const NAMES = {
@@ -54,37 +60,38 @@ export const PRESETS = {
   standard: {
     name: 'Standard Task Group',
     ships: [
-      { cls: 'ddg', modules: ['ssm', 'ssm', 'sam', 'sam', 'ciws', 'ciws', 'gun', 'jammer'] },
-      { cls: 'ffg', modules: ['ssm', 'sam', 'ciws', 'gun', 'jammer', 'chaff'] },
-      { cls: 'ffg', modules: ['ssm', 'sam', 'ciws', 'gun', 'jammer', 'chaff'] },
-      { cls: 'fac', modules: ['ssm', 'gun', 'ciws', 'engine'] },
+      { cls: 'ddg', modules: ['skimmer', 'skimmer', 'sam', 'ciws', 'search', 'naval'] },
+      { cls: 'ffg', modules: ['skimmer', 'sam', 'ciws', 'noise'] },
+      { cls: 'ffg', modules: ['skimmer', 'sam', 'ciws', 'noise'] },
+      { cls: 'fac', modules: ['skimmer', 'autocannon'] },
     ],
   },
   wolfpack: {
     name: 'Wolfpack',
     ships: [
-      { cls: 'ffg', modules: ['sam', 'sam', 'ciws', 'radar', 'esm', 'jammer'] },
-      { cls: 'fac', modules: ['ssm', 'ssm', 'engine', 'chaff'] },
-      { cls: 'fac', modules: ['ssm', 'ssm', 'engine', 'chaff'] },
-      { cls: 'fac', modules: ['ssm', 'ssm', 'engine', 'chaff'] },
-      { cls: 'fac', modules: ['ssm', 'ssm', 'engine', 'chaff'] },
+      { cls: 'ffg', modules: ['early', 'sam', 'barrage', 'laser'] },
+      { cls: 'fac', modules: ['supersonic', 'autocannon'] },
+      { cls: 'fac', modules: ['supersonic', 'autocannon'] },
+      { cls: 'fac', modules: ['supersonic', 'autocannon'] },
+      { cls: 'fac', modules: ['supersonic', 'autocannon'] },
+      { cls: 'fac', modules: ['supersonic', 'decoy'] },
     ],
   },
   shield: {
     name: 'Air Defence Group',
     ships: [
-      { cls: 'ddg', modules: ['sam', 'sam', 'sam', 'ciws', 'ciws', 'radar', 'esm', 'ssm'] },
-      { cls: 'ddg', modules: ['ssm', 'ssm', 'ssm', 'sam', 'ciws', 'gun', 'armor', 'jammer'] },
-      { cls: 'ffg', modules: ['ssm', 'sam', 'ciws', 'gun', 'jammer', 'chaff'] },
+      { cls: 'ddg', modules: ['sam', 'sam', 'laser', 'ciws', 'fire', 'search'] },
+      { cls: 'ddg', modules: ['cruise', 'cruise', 'skimmer', 'naval', 'ciws', 'noise'] },
+      { cls: 'ffg', modules: ['skimmer', 'sam', 'ciws', 'naval'] },
     ],
   },
-  stealth: {
-    name: 'Silent Hunters',
+  strike: {
+    name: 'Long-Range Strike',
     ships: [
-      { cls: 'ffg', modules: ['ssm', 'ssm', 'esm', 'ciws', 'chaff', 'engine'] },
-      { cls: 'ffg', modules: ['ssm', 'ssm', 'esm', 'ciws', 'chaff', 'engine'] },
-      { cls: 'ffg', modules: ['ssm', 'sam', 'radar', 'jammer', 'ciws', 'gun'] },
-      { cls: 'fac', modules: ['ssm', 'esm', 'engine', 'gun'] },
+      { cls: 'ddg', modules: ['cruise', 'cruise', 'cruise', 'early', 'sam', 'ciws'] },
+      { cls: 'ffg', modules: ['railgun', 'search', 'sam', 'ciws'] },
+      { cls: 'ffg', modules: ['railgun', 'noise', 'sam', 'ciws'] },
+      { cls: 'fac', modules: ['cruise', 'decoy'] },
     ],
   },
 };
@@ -134,50 +141,52 @@ export function randomFleet(side = 'red') {
   const plans = [
     ['ddg', 'ffg', 'ffg', 'fac'],
     ['ddg', 'ddg', 'ffg'],
-    ['ffg', 'ffg', 'ffg', 'fac'],
+    ['ffg', 'ffg', 'ffg', 'fac', 'fac'],
     ['ffg', 'fac', 'fac', 'fac', 'fac'],
     ['ddg', 'fac', 'fac', 'fac'],
   ];
-  const hulls = plans[Math.floor(Math.random() * plans.length)];
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const hulls = pick(plans);
   const ships = hulls.map((cls) => ({ cls, modules: [] }));
   let budget = BUDGET - ships.reduce((a, d) => a + HULLS[d.cls].cost, 0);
-  // Everyone gets missiles and a gun first, then weighted extras.
-  const want = ['ssm', 'gun', 'ciws', 'sam', 'ssm', 'jammer', 'chaff', 'sam', 'radar', 'esm', 'armor', 'engine', 'ssm', 'ciws'];
-  for (const m of want) {
-    for (const d of ships) {
-      const cost = MODULES[m].cost;
-      if (d.modules.length >= HULLS[d.cls].slots || cost > budget) continue;
-      if (MODULES[m].unique && d.modules.includes(m)) continue;
-      if (m === 'sam' && d.cls === 'fac') continue;
-      if (Math.random() < 0.25 && m !== 'ssm') continue;
-      d.modules.push(m);
-      budget -= cost;
-    }
+  const fit = (d, m) => {
+    if (d.modules.length >= HULLS[d.cls].slots || MODULES[m].cost > budget) return;
+    if (MODULES[m].unique && d.modules.includes(m)) return;
+    d.modules.push(m);
+    budget -= MODULES[m].cost;
+  };
+  // every ship gets a missile battery; then a role-flavoured second pass
+  for (const d of ships) fit(d, pick(['skimmer', 'skimmer', 'supersonic', 'cruise']));
+  for (const d of ships) {
+    const wants =
+      d.cls === 'fac'
+        ? [pick(['autocannon', 'decoy', 'skimmer', 'supersonic'])]
+        : [pick(['sam', 'sam', 'laser']), pick(['ciws', 'autocannon']), pick(['search', 'fire', 'early', 'noise', 'barrage']), pick(['naval', 'railgun', 'skimmer', 'noise']), 'sam', pick(['search', 'cruise', 'decoy'])];
+    for (const m of wants) fit(d, m);
   }
   return validateFleet({ ships }, side);
 }
 
-// Stats for one ship design: the hull's class values plus its modules.
+// Stats for one ship design: the hull's values plus its modules.
 export function buildSpec(cls, modules = []) {
   const base = CLASSES[cls];
   const n = (m) => modules.filter((x) => x === m).length;
-  const guns = n('gun');
-  const engines = n('engine');
-  const speed = Math.pow(1.12, engines);
+  const radars = [RADAR_TYPES.nav, ...['search', 'early', 'fire'].filter((r) => n(r)).map((r) => RADAR_TYPES[r])];
+  const jammers = ['noise', 'barrage'].filter((j) => n(j)).map((j) => ({ key: j, ...JAMMER_TYPES[j] }));
   return {
     ...base,
-    hp: Math.round(base.hp * (1 + 0.3 * n('armor'))),
-    ssm: 4 * n('ssm'),
-    sam: 6 * n('sam'),
-    chaff: { fac: 1, ffg: 2, ddg: 2 }[cls] + 3 * n('chaff'),
+    ammo: { skimmer: 4 * n('skimmer'), supersonic: 2 * n('supersonic'), cruise: 2 * n('cruise') },
+    sam: 8 * n('sam'),
     ciws: n('ciws'),
-    ciwsPk: 0.35 * n('ciws'),
-    gun: guns ? { ...base.gun, reload: base.gun.reload * Math.pow(0.65, guns - 1) } : null,
-    radar: base.radar * (n('radar') ? 1.35 : 1),
-    esm: n('esm') ? 1.4 : 1,
-    canJam: n('jammer') > 0,
-    maxSpeed: base.maxSpeed * speed,
-    accel: base.accel * speed,
+    ciwsPk: 0.45 * n('ciws'),
+    laser: n('laser'),
+    chaff: base.chaff + 4 * n('decoy'),
+    guns: modules.filter((m) => GUN_TYPES[m]).map((m) => ({ key: m, ...GUN_TYPES[m] })),
+    radars,
+    radarRange: Math.max(...radars.map((r) => r.range)),
+    jammers,
+    canJam: jammers.length > 0,
+    maxRange: Math.max(0, ...Object.keys(MISSILE_TYPES).filter((k) => n(k)).map((k) => MISSILE_TYPES[k].range)),
     modules: modules.slice(),
   };
 }
