@@ -102,23 +102,28 @@
     <div id="editor" class="screen hidden">
       <div class="ed-wrap">
         <div class="ed-head">
-          <h2>FLEET CREATOR</h2>
+          <h2>FLEET</h2>
           <div class="ed-budget"><div class="bar"><i id="ed-budget-bar"></i></div><span id="ed-budget-text"></span></div>
+          <div class="ed-btns">
+            <button id="ed-cancel">CANCEL</button>
+            <button class="big" id="ed-done">SAVE</button>
+          </div>
         </div>
         <div class="ed-body">
-          <div class="ed-col" id="ed-ships"></div>
-          <div class="ed-col ed-mid">
-            <canvas id="ed-preview" width="200" height="110"></canvas>
-            <div id="ed-fit"></div>
+          <div class="ed-col" id="ed-roster"></div>
+          <div class="ed-mid">
+            <div class="ed-stage">
+              <canvas id="ed-preview" width="320" height="150"></canvas>
+              <div id="ed-title"></div>
+            </div>
+            <div id="ed-slots"></div>
+            <div id="ed-stats"></div>
           </div>
           <div class="ed-col" id="ed-parts"></div>
         </div>
         <div class="ed-foot">
-          <div class="ed-presets"><span>PRESETS</span><span id="ed-presets"></span></div>
-          <div class="ed-btns">
-            <button id="ed-cancel">CANCEL</button>
-            <button class="big" id="ed-done">SAVE FLEET</button>
-          </div>
+          <div id="ed-presets"></div>
+          <div id="ed-info"></div>
         </div>
       </div>
     </div>
@@ -158,8 +163,8 @@
           <tr><td>Detection</td><td>The fleets start out of radar range. Small hulls are harder for radar to see than big ones. A radar or jammer that is switched on can be heard from farther away than it can see, but that gives only a rough, drifting position.</td></tr>
           <tr><td>Islands</td><td>Land blocks radar, sight and sea-skimming missiles. A ship within 350 m of a coast hides in the radar clutter: enemy radar sees it at only half range (card shows COAST MASK).</td></tr>
           <tr><td>Traffic</td><td>Freighters come and go from every direction; many follow a hidden shipping lane that runs through the control point. Airliners cross high overhead (air defences ignore them). Whales show up on passive sonar like submarines; an active ping tells them apart.</td></tr>
-          <tr><td>I / O / K / L</td><td>Call air support from off the map: <b>I</b> fighters (shoot down enemy aircraft), <b>O</b> strike jets (click an identified ship), <b>K</b> patrol plane (radar, sonobuoys, torpedoes), <b>L</b> radar plane (11 km sweep). They fly in from your edge, work for a while, then go home. Each has a cooldown.</td></tr>
-          <tr><td>Aircraft</td><td>Helicopters, recon and strike drones launch from their deck. Select and move them like ships. SAMs, CIWS and lasers shoot them down.</td></tr>
+          <tr><td>I / O / K / L</td><td>Call a squadron from your air wing (designed in the fleet creator). Click a patrol point, or an identified enemy ship if it carries anti-ship missiles. It flies in from your edge, works for a while, then goes home.</td></tr>
+          <tr><td>Aircraft</td><td>Helicopters and drones fly from ships with a hangar. Select and move them like ships. SAMs, CIWS and lasers shoot them down; flares halve the chance.</td></tr>
           <tr><td>Control point</td><td>Hold the ringed area alone to capture it. The holder scores; first to 300 wins. Sinking the enemy fleet also wins.</td></tr>
           <tr><td>[ / ]  or  R / V</td><td>Ring up more / less speed. Backspace = all stop.</td></tr>
           <tr><td>1–4, `</td><td>Select ship / whole fleet. Double-tap to jump the camera.</td></tr>

@@ -1,72 +1,94 @@
-// Fleet creator: pick hulls, fit modules into slots, stay under budget.
+// Fleet creator: ships and aircraft are designs of a hull (or airframe)
+// plus a module in each slot, all paid for from one points budget.
 import * as THREE from 'three';
 import { CLASSES, KNOTS } from '../config.js';
 import {
   BUDGET,
   MAX_SHIPS,
+  MAX_SQUADRONS,
   HULLS,
   MODULES,
-  CATEGORIES,
+  AIRFRAMES,
+  AIR_MODULES,
+  DECK_DEFAULT,
   PRESETS,
   buildSpec,
   clone,
   fleetCost,
   shipCost,
+  airCost,
+  deckCount,
   shipName,
   presetFleet,
   moduleFits,
+  airModuleFits,
 } from '../fleet.js';
 import { buildShipModel } from '../render/shipModels.js';
+import { icon, silhouette } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// Small pixelated 3D turntable of the selected hull.
+const CATS = [
+  ['missiles', 'Missiles'],
+  ['guns', 'Guns'],
+  ['defense', 'Defence'],
+  ['sensors', 'Sensors'],
+  ['ew', 'Jammers'],
+  ['air', 'Hangars'],
+];
+const KEYS = ['I', 'O', 'K', 'L'];
+const GUNS = ['autocannon', 'naval', 'railgun'];
+const MISSILE_RANGE = { skimmer: 4.2, supersonic: 3.3, cruise: 7.5, heavy: 3.6, light: 2.8, aam: 4.2 };
+
+// Pixelated 3D turntable of the selected design.
 class Preview {
   constructor(canvas) {
-    this.canvas = canvas;
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true });
     this.gl.setPixelRatio(1);
-    this.gl.setSize(200, 110, false);
+    this.gl.setSize(320, 150, false);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(30, 200 / 110, 1, 1000);
+    this.camera = new THREE.PerspectiveCamera(28, 320 / 150, 1, 2000);
     const sun = new THREE.DirectionalLight(0xffd2a0, 3);
     sun.position.set(60, 80, 40);
     const fill = new THREE.DirectionalLight(0x8fb0ff, 1.2);
     fill.position.set(-60, 30, -50);
     this.scene.add(sun, fill, new THREE.HemisphereLight(0x9fb8e0, 0x203040, 1));
-    // water plane
-    const sea = new THREE.Mesh(
-      new THREE.CircleGeometry(70, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x0b3346, transparent: true, opacity: 0.85 }),
+    this.sea = new THREE.Mesh(
+      new THREE.CircleGeometry(90, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x0b3346, transparent: true, opacity: 0.8 }),
     );
-    sea.position.y = 0.1;
-    this.scene.add(sea);
+    this.scene.add(this.sea);
     this.model = null;
-    this.cls = null;
+    this.key = null;
     this.t = 0;
   }
 
-  show(cls) {
-    if (cls === this.cls) return;
-    this.cls = cls;
+  show(cls, modules) {
+    const key = cls + (modules.includes('aew') ? '+aew' : '');
+    if (key === this.key) return;
+    this.key = key;
     if (this.model) this.scene.remove(this.model.group);
     this.model = buildShipModel(cls, 'blue');
+    if (this.model.dome) this.model.dome.visible = modules.includes('aew');
     this.scene.add(this.model.group);
-    const len = CLASSES[cls].len;
-    this.dist = len * 1.55 + 18;
+    const c = CLASSES[cls];
+    this.air = !!c.air;
+    this.dist = Math.max(c.len, c.beam) * (this.air ? 2.1 : 1.5) + 18;
+    this.sea.visible = !this.air;
   }
 
   frame(dt, hasGun) {
     if (!this.model) return;
     this.t += dt;
-    const a = this.t * 0.45;
-    this.camera.position.set(Math.sin(a) * this.dist, this.dist * 0.42, Math.cos(a) * this.dist);
-    this.camera.lookAt(0, 6, 0);
+    const a = this.t * 0.4;
+    this.camera.position.set(Math.sin(a) * this.dist, this.dist * (this.air ? 0.55 : 0.4), Math.cos(a) * this.dist);
+    this.camera.lookAt(0, this.air ? 0 : 5, 0);
     this.model.radar.rotation.y += dt * 2.6;
+    if (this.model.rotor) this.model.rotor.rotation.y += dt * 30;
     this.model.turret.visible = hasGun;
-    this.model.body.position.y = Math.sin(this.t * 1.3) * 0.4 - 0.3;
-    this.model.body.rotation.z = Math.sin(this.t * 0.9) * 0.03;
+    this.model.body.position.y = Math.sin(this.t * 1.3) * (this.air ? 1.5 : 0.4) - (this.air ? 0 : 0.3);
+    this.model.body.rotation.z = Math.sin(this.t * 0.9) * (this.air ? 0.12 : 0.03);
     this.gl.render(this.scene, this.camera);
   }
 }
@@ -77,14 +99,16 @@ export class FleetEditor {
     this.click = onClick || (() => {});
     this.root = $('editor');
     this.fleet = null;
-    this.sel = 0;
+    this.sel = { kind: 'ship', i: 0 };
     this.preview = null;
     this.open = false;
   }
 
   show(fleet) {
     this.fleet = clone(fleet);
-    this.sel = 0;
+    this.fleet.air = this.fleet.air || [];
+    this.fleet.deck = this.fleet.deck || clone(DECK_DEFAULT);
+    this.sel = { kind: 'ship', i: 0 };
     this.open = true;
     this.root.classList.remove('hidden');
     if (!this.preview) this.preview = new Preview($('ed-preview'));
@@ -98,10 +122,22 @@ export class FleetEditor {
 
   frame(dt) {
     if (!this.open || !this.preview) return;
-    const d = this.fleet.ships[this.sel];
+    const d = this.current();
     if (!d) return;
-    this.preview.show(d.cls);
-    this.preview.frame(dt, d.modules.some((m) => ['autocannon', 'naval', 'railgun'].includes(m)));
+    this.preview.show(d.cls, d.modules);
+    this.preview.frame(dt, d.modules.some((m) => GUNS.includes(m)));
+  }
+
+  // The design being edited: a ship, a squadron, or a deck aircraft.
+  current() {
+    const { kind, i } = this.sel;
+    if (kind === 'ship') return this.fleet.ships[i];
+    if (kind === 'air') return this.fleet.air[i];
+    return { cls: i, modules: this.fleet.deck[i], name: AIRFRAMES[i].name };
+  }
+
+  isAir() {
+    return this.sel.kind !== 'ship';
   }
 
   // ---------------------------------------------------------------- edits
@@ -109,177 +145,243 @@ export class FleetEditor {
     return fleetCost(this.fleet);
   }
 
-  canAfford(extra) {
-    return this.cost() + extra <= BUDGET;
+  // Would this change keep the fleet inside the budget?
+  affordable(mutate) {
+    const f = clone(this.fleet);
+    mutate(f);
+    return fleetCost(f) <= BUDGET;
   }
 
-  addShip(cls) {
-    if (this.fleet.ships.length >= MAX_SHIPS || !this.canAfford(HULLS[cls].cost)) return this.click(false);
-    const used = this.fleet.ships.map((d) => d.name);
-    this.fleet.ships.push({ cls, modules: [], name: shipName('blue', cls, used) });
-    this.sel = this.fleet.ships.length - 1;
+  select(kind, i) {
+    this.sel = { kind, i };
     this.click(true);
     this.render();
   }
 
-  removeShip(i) {
-    if (this.fleet.ships.length <= 1) return this.click(false);
-    this.fleet.ships.splice(i, 1);
-    this.sel = Math.min(this.sel, this.fleet.ships.length - 1);
+  addShip(cls) {
+    if (this.fleet.ships.length >= MAX_SHIPS || !this.affordable((f) => f.ships.push({ cls, modules: [] }))) return this.click(false);
+    const used = this.fleet.ships.map((d) => d.name);
+    this.fleet.ships.push({ cls, modules: [], name: shipName('blue', cls, used) });
+    this.select('ship', this.fleet.ships.length - 1);
+  }
+
+  addSquadron(cls) {
+    if (this.fleet.air.length >= MAX_SQUADRONS || !this.affordable((f) => f.air.push({ cls, modules: [] }))) return this.click(false);
+    const n = this.fleet.air.filter((d) => d.cls === cls).length;
+    this.fleet.air.push({ cls, modules: [], name: AIRFRAMES[cls].name + (n ? ` ${n + 1}` : '') });
+    this.select('air', this.fleet.air.length - 1);
+  }
+
+  remove(kind, i) {
+    if (kind === 'ship') {
+      if (this.fleet.ships.length <= 1) return this.click(false);
+      this.fleet.ships.splice(i, 1);
+    } else this.fleet.air.splice(i, 1);
+    this.sel = { kind: 'ship', i: Math.min(this.sel.kind === 'ship' ? this.sel.i : 0, this.fleet.ships.length - 1) };
     this.click(true);
     this.render();
   }
 
   fit(mod) {
-    const d = this.fleet.ships[this.sel];
+    const d = this.current();
     if (!d || !this.fitState(d, mod).ok) return this.click(false);
     d.modules.push(mod);
+    // a new hangar may bring a deck design into the fleet
     this.click(true);
     this.render();
   }
 
-  unfit(i) {
-    const d = this.fleet.ships[this.sel];
-    d.modules.splice(i, 1);
+  unfit(k) {
+    this.current().modules.splice(k, 1);
     this.click(true);
     this.render();
   }
 
   fitState(d, mod) {
-    const m = MODULES[mod];
-    if (!moduleFits(d.cls, mod)) return { ok: false, why: d.cls === 'ssk' ? 'Not for submarines' : 'Not for this hull' };
-    if (d.modules.length >= HULLS[d.cls].slots) return { ok: false, why: 'No free slot' };
-    if (m.unique && d.modules.includes(mod)) return { ok: false, why: 'Only one per ship' };
-    if (!this.canAfford(m.cost)) return { ok: false, why: 'Over budget' };
+    const air = this.isAir();
+    const m = air ? AIR_MODULES[mod] : MODULES[mod];
+    const slots = air ? AIRFRAMES[d.cls].slots : HULLS[d.cls].slots;
+    if (air ? !airModuleFits(d.cls, mod) : !moduleFits(d.cls, mod)) return { ok: false, why: `Doesn't fit a ${(air ? AIRFRAMES[d.cls] : HULLS[d.cls]).name.toLowerCase()}` };
+    if (d.modules.length >= slots) return { ok: false, why: 'No free slot' };
+    if (m.unique && d.modules.includes(mod)) return { ok: false, why: 'One per design' };
+    const { kind, i } = this.sel;
+    const ok = this.affordable((f) => {
+      if (kind === 'ship') f.ships[i].modules.push(mod);
+      else if (kind === 'air') f.air[i].modules.push(mod);
+      else f.deck[i].push(mod);
+    });
+    if (!ok) return { ok: false, why: 'Over budget' };
     return { ok: true };
   }
 
   preset(key) {
     this.fleet = presetFleet(key, 'blue');
-    this.sel = 0;
+    this.sel = { kind: 'ship', i: 0 };
     this.click(true);
     this.render();
   }
 
   // ---------------------------------------------------------------- view
   render() {
-    const f = this.fleet;
     const cost = this.cost();
-    const pct = Math.min(100, (cost / BUDGET) * 100);
-    $('ed-budget-bar').style.width = `${pct}%`;
+    $('ed-budget-bar').style.width = `${Math.min(100, (cost / BUDGET) * 100)}%`;
     $('ed-budget-bar').className = cost > BUDGET * 0.95 ? 'hot' : '';
-    $('ed-budget-text').textContent = `${cost} / ${BUDGET} PTS`;
+    $('ed-budget-text').innerHTML = `<b>${BUDGET - cost}</b> left`;
+    this.renderRoster();
+    this.renderDesign();
+    this.renderParts();
+    this.bind();
+  }
 
-    // ship list
-    const list = f.ships
-      .map((d, i) => {
-        const h = HULLS[d.cls];
-        const pips = Array.from({ length: h.slots }, (_, k) => `<i class="${d.modules[k] ? MODULES[d.modules[k]].cat : ''}"></i>`).join('');
-        return `<div class="ed-ship ${i === this.sel ? 'sel' : ''}" data-i="${i}">
-          <div class="r1"><span>${esc(d.name.toUpperCase())}</span><span>${shipCost(d)}</span></div>
-          <div class="r2"><span>${h.name}</span><span class="pips">${pips}</span></div>
-          <button class="x" data-rm="${i}" title="Remove ship">×</button>
-        </div>`;
-      })
-      .join('');
-    const adds = Object.entries(HULLS)
+  pips(n, mods, defs) {
+    return `<span class="pips">${Array.from({ length: n }, (_, k) => `<i class="${mods[k] ? defs[mods[k]].cat : ''}"></i>`).join('')}</span>`;
+  }
+
+  renderRoster() {
+    const f = this.fleet;
+    const s = this.sel;
+    const tile = (kind, i, cls, name, cost, pips, extra = '', removable = true) => `
+      <div class="ed-unit ${s.kind === kind && s.i === i ? 'sel' : ''}" data-sel="${kind}:${i}">
+        ${silhouette(cls)}
+        <div class="nm">${extra}${esc(name.toUpperCase())}</div>
+        <div class="ft">${pips}<b>${cost}</b></div>
+        ${removable ? `<button class="x" data-rm="${kind}:${i}" title="Remove">×</button>` : ''}
+      </div>`;
+    const ships = f.ships.map((d, i) => tile('ship', i, d.cls, d.name, shipCost(d), this.pips(HULLS[d.cls].slots, d.modules, MODULES), '', f.ships.length > 1)).join('');
+    const addShip = Object.entries(HULLS)
       .map(([cls, h]) => {
-        const ok = f.ships.length < MAX_SHIPS && this.canAfford(h.cost);
-        return `<button class="ed-add" data-add="${cls}" ${ok ? '' : 'disabled'}>+ ${h.name.toUpperCase()}<small>${h.slots} slots · ${h.cost} pts</small></button>`;
+        const ok = f.ships.length < MAX_SHIPS && this.affordable((q) => q.ships.push({ cls, modules: [] }));
+        return `<button class="ed-new" data-add="ship:${cls}" ${ok ? '' : 'disabled'} title="${h.name} · ${h.blurb} · ${h.slots} slots">${silhouette(cls)}<b>${h.cost}</b></button>`;
       })
       .join('');
-    $('ed-ships').innerHTML = `${list}<div class="ed-adds">${adds}</div><div class="ed-count">${f.ships.length} / ${MAX_SHIPS} SHIPS</div>`;
+    const air = f.air.map((d, i) => tile('air', i, d.cls, d.name, airCost(d), this.pips(AIRFRAMES[d.cls].slots, d.modules, AIR_MODULES), `<kbd>${KEYS[i]}</kbd>`)).join('');
+    const addAir = Object.entries(AIRFRAMES)
+      .filter(([, a]) => !a.deck)
+      .map(([cls, a]) => {
+        const ok = f.air.length < MAX_SQUADRONS && this.affordable((q) => q.air.push({ cls, modules: [] }));
+        return `<button class="ed-new" data-add="air:${cls}" ${ok ? '' : 'disabled'} title="${a.name} · ${a.blurb} · ${a.slots} slots">${silhouette(cls)}<b>${a.cost}</b></button>`;
+      })
+      .join('');
+    const n = deckCount(f);
+    const deck = ['helo', 'drone']
+      .filter((k) => n[k])
+      .map((k) => tile('deck', k, k, AIRFRAMES[k].name, airCost({ cls: k, modules: f.deck[k] }) * n[k], this.pips(AIRFRAMES[k].slots, f.deck[k], AIR_MODULES), `<kbd>×${n[k]}</kbd>`, false))
+      .join('');
+    $('ed-roster').innerHTML = `
+      <div class="ed-sec"><span>SHIPS</span><em>${f.ships.length}/${MAX_SHIPS}</em></div>
+      ${ships}<div class="ed-adds">${addShip}</div>
+      <div class="ed-sec"><span>AIR WING</span><em>${f.air.length}/${MAX_SQUADRONS}</em></div>
+      ${air}<div class="ed-adds">${addAir}</div>
+      ${deck ? `<div class="ed-sec"><span>ON DECK</span></div>${deck}` : ''}`;
+  }
 
-    // selected ship
-    const d = f.ships[this.sel];
-    const h = HULLS[d.cls];
+  renderDesign() {
+    const d = this.current();
+    const air = this.isAir();
+    const frame = air ? AIRFRAMES[d.cls] : HULLS[d.cls];
+    const defs = air ? AIR_MODULES : MODULES;
     const spec = buildSpec(d.cls, d.modules);
-    const slots = Array.from({ length: h.slots }, (_, k) => {
+    const named = this.sel.kind !== 'deck';
+    $('ed-title').innerHTML = `
+      ${named ? `<input id="ed-name" maxlength="16" value="${esc(d.name)}" spellcheck="false" />` : `<div class="fixed">${esc(frame.name.toUpperCase())}</div>`}
+      <div class="sub">${frame.name.toUpperCase()} · ${frame.blurb.toUpperCase()}</div>`;
+    $('ed-slots').innerHTML = Array.from({ length: frame.slots }, (_, k) => {
       const m = d.modules[k];
-      return m
-        ? `<button class="slot ${MODULES[m].cat}" data-unfit="${k}" title="Click to remove">${MODULES[m].short}<small>${MODULES[m].cost}</small></button>`
-        : `<div class="slot empty">EMPTY</div>`;
+      if (!m) return '<div class="slot empty"><span>+</span></div>';
+      const M = defs[m];
+      return `<button class="slot ${M.cat}" data-unfit="${k}" data-info="${esc(`${M.name} — ${M.desc}`)}">${icon(m)}<span>${M.short}</span>${M.qty ? `<em>×${M.qty}</em>` : ''}</button>`;
     }).join('');
-    const bar = (label, v, max, text) =>
-      `<div class="stat"><span>${label}</span><div class="sb"><i style="width:${Math.min(100, (v / max) * 100)}%"></i></div><b>${text}</b></div>`;
-    const warn = [];
-    const missiles = Object.values(spec.ammo).reduce((a, b) => a + b, 0);
-    if (!missiles && !spec.guns.length && !spec.aircraft.includes('strike')) warn.push('No weapons — this ship cannot attack.');
-    if (d.cls !== 'ssk' && !spec.sam && !spec.ciws && !spec.laser && !spec.guns.some((g) => g.antiMissile)) warn.push('No missile defence fitted.');
-    const ammoName = { skimmer: 'SKIMMER', supersonic: 'SUPERSONIC', cruise: 'CRUISE', heavy: 'TORPEDO', light: 'ASW TORP' };
-    const ammo = Object.entries(spec.ammo).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${ammoName[k]}`).join(' · ') || 'none';
-    const guns = spec.guns.map((g) => g.name.replace('127mm Naval', '127mm')).join(', ') || 'none';
-    const radar = spec.radars.map((r) => r.name.replace(' Radar', '')).join(' + ');
-    const jam = spec.jammers.map((j) => j.name).join(', ') || 'none';
-    const extras = [spec.sonar ? spec.sonar.name : '', ...spec.aircraft.map((a) => MODULES[a].name)].filter(Boolean).join(' · ') || 'none';
-    $('ed-fit').innerHTML = `
-      <div class="ed-name">
-        <input id="ed-name" maxlength="16" value="${esc(d.name)}" spellcheck="false" />
-        <span>${h.size.toUpperCase()} · ${h.name.toUpperCase()}</span>
-      </div>
-      <div class="ed-blurb">${h.blurb}</div>
-      <div class="slots">${slots}</div>
-      <div class="stats">
-        ${bar('HULL', spec.hp, 110, spec.hp)}
-        ${bar('SPEED', spec.maxSpeed * KNOTS, 52, `${Math.round(spec.maxSpeed * KNOTS)} kt`)}
-        ${bar('RADAR', spec.radarRange, 8000, `${(spec.radarRange / 1000).toFixed(1)} km`)}
-        ${bar('SAMS', spec.sam, 24, spec.sam)}
-        <div class="line"><span>MISSILES</span><b>${ammo}</b></div>
-        <div class="line"><span>GUNS</span><b>${guns}</b></div>
-        <div class="line"><span>SENSORS</span><b>${radar}</b></div>
-        <div class="line"><span>JAMMER</span><b>${jam}</b></div>
-        <div class="line"><span>SONAR/AIR</span><b>${extras}</b></div>
-        <div class="line"><span>DEFENCE</span><b>${[spec.ciws ? `${spec.ciws}× CIWS` : '', spec.laser ? 'LASER' : '', `${spec.chaff} DECOYS`].filter(Boolean).join(' · ')}</b></div>
-      </div>
-      <div class="ed-warn">${warn.join('<br>')}</div>`;
 
-    // module palette
-    $('ed-parts').innerHTML = CATEGORIES.map(([cat, label]) => {
-      const items = Object.entries(MODULES)
-        .filter(([, m]) => m.cat === cat)
+    // stats as bars
+    const ammo = spec.ammo;
+    const shots = (ammo.skimmer || 0) + (ammo.supersonic || 0) * 1.5 + (ammo.cruise || 0) * 1.2 + (ammo.heavy || 0) * 1.5 + (ammo.light || 0) * 0.6 + (ammo.aam || 0) * 0.6 + spec.guns.length * 2.5;
+    const reach = Math.max(0, ...Object.entries(ammo).filter(([, v]) => v > 0).map(([k]) => MISSILE_RANGE[k] || 0), ...spec.guns.map((g) => g.range / 1000));
+    const defence = air ? (spec.flares ? 5 : 0) : spec.sam * 0.6 + spec.ciws * 4 + spec.laser * 5 + spec.chaff * 0.5 + (spec.guns.some((g) => g.antiMissile) ? 2 : 0);
+    const radar = spec.radars.reduce((a, r) => Math.max(a, r.range), 0) / 1000;
+    const rows = [
+      ['missiles', 'ATTACK', shots, 24, shots ? Math.round(shots) : '—'],
+      ['cruise', 'REACH', reach, 7.5, reach ? `${reach.toFixed(1)} km` : '—'],
+      ['sam', 'DEFENCE', defence, 20, defence ? Math.round(defence) : '—'],
+      ['search', 'RADAR', radar, 11, radar > 1 ? `${radar.toFixed(1)} km` : '—'],
+    ];
+    if (air && frame.count) rows.push(['fuel', 'ON STATION', frame.duration * spec.endurance, 170, `${Math.round(frame.duration * spec.endurance)} s`]);
+    else rows.push(['skimmer', 'SPEED', spec.maxSpeed * KNOTS, air ? 300 : 52, `${Math.round(spec.maxSpeed * KNOTS)} kt`]);
+    if (!air) rows.push(['decoy', 'HULL', spec.hp, 110, spec.hp]);
+    $('ed-stats').innerHTML = rows
+      .map(([ic, label, v, max, text]) => `<div class="st"><span>${icon(ic)}${label}</span><div class="sb"><i style="width:${Math.min(100, (v / max) * 100)}%"></i></div><b>${text}</b></div>`)
+      .join('');
+  }
+
+  renderParts() {
+    const d = this.current();
+    const air = this.isAir();
+    const defs = air ? AIR_MODULES : MODULES;
+    $('ed-parts').innerHTML = CATS.map(([cat, label]) => {
+      const items = Object.entries(defs)
+        .filter(([key, m]) => m.cat === cat && (air ? airModuleFits(d.cls, key) : moduleFits(d.cls, key)))
         .map(([key, m]) => {
           const st = this.fitState(d, key);
-          return `<button class="part ${cat}" data-fit="${key}" ${st.ok ? '' : 'disabled'} title="${st.ok ? '' : st.why}">
-            <span class="pn">${m.name}</span><span class="pc">${m.cost}</span>
-            <span class="pd">${st.ok || st.why === 'No free slot' || st.why === 'Over budget' ? m.desc : st.why}</span></button>`;
+          const info = `${m.name} — ${m.desc}${st.ok ? '' : ` · ${st.why}`}`;
+          return `<button class="part ${cat}" data-fit="${key}" ${st.ok ? '' : 'aria-disabled="true"'} data-info="${esc(info)}">
+            ${icon(key)}<span class="pn">${m.short}</span><span class="pc">${m.cost}</span>${m.qty ? `<em>×${m.qty}</em>` : ''}</button>`;
         })
         .join('');
-      return `<div class="cat"><div class="ch ${cat}">${label.toUpperCase()}</div>${items}</div>`;
+      return items ? `<div class="cat"><div class="ch ${cat}"><i></i>${label.toUpperCase()}</div><div class="grid">${items}</div></div>` : '';
     }).join('');
+  }
 
-    this.bind();
+  info(text) {
+    $('ed-info').textContent = text || '';
   }
 
   bind() {
     const r = this.root;
-    r.querySelectorAll('[data-i]').forEach((el) =>
+    r.querySelectorAll('[data-sel]').forEach((el) =>
       el.addEventListener('click', () => {
-        this.sel = +el.dataset.i;
-        this.click(true);
-        this.render();
+        const [kind, i] = el.dataset.sel.split(':');
+        this.select(kind, kind === 'deck' ? i : +i);
       }),
     );
     r.querySelectorAll('[data-rm]').forEach((el) =>
       el.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.removeShip(+el.dataset.rm);
+        const [kind, i] = el.dataset.rm.split(':');
+        this.remove(kind, +i);
       }),
     );
-    r.querySelectorAll('[data-add]').forEach((el) => el.addEventListener('click', () => this.addShip(el.dataset.add)));
+    r.querySelectorAll('[data-add]').forEach((el) =>
+      el.addEventListener('click', () => {
+        const [kind, cls] = el.dataset.add.split(':');
+        if (kind === 'ship') this.addShip(cls);
+        else this.addSquadron(cls);
+      }),
+    );
     r.querySelectorAll('[data-fit]').forEach((el) => el.addEventListener('click', () => this.fit(el.dataset.fit)));
     r.querySelectorAll('[data-unfit]').forEach((el) => el.addEventListener('click', () => this.unfit(+el.dataset.unfit)));
+    r.querySelectorAll('[data-info]').forEach((el) => {
+      el.addEventListener('mouseenter', () => this.info(el.dataset.info));
+      el.addEventListener('mouseleave', () => this.info(''));
+    });
+    r.querySelectorAll('[title]').forEach((el) => {
+      if (el.closest('#ed-roster')) {
+        el.addEventListener('mouseenter', () => this.info(el.title));
+        el.addEventListener('mouseleave', () => this.info(''));
+      }
+    });
     const name = $('ed-name');
+    if (!name) return;
     name.addEventListener('keydown', (e) => e.stopPropagation());
     name.addEventListener('input', () => {
-      this.fleet.ships[this.sel].name = name.value.replace(/[^\w\s-]/g, '').slice(0, 16) || HULLS[this.fleet.ships[this.sel].cls].name;
-      const row = r.querySelector(`.ed-ship[data-i="${this.sel}"] .r1 span`);
-      if (row) row.textContent = this.fleet.ships[this.sel].name.toUpperCase();
+      const d = this.current();
+      d.name = name.value.replace(/[^\w\s-]/g, '').slice(0, 16) || (this.isAir() ? AIRFRAMES[d.cls].name : HULLS[d.cls].name);
+      const row = r.querySelector(`.ed-unit.sel .nm`);
+      if (row) row.innerHTML = (this.sel.kind === 'air' ? `<kbd>${KEYS[this.sel.i]}</kbd>` : '') + esc(d.name.toUpperCase());
     });
   }
 
   presetsHTML() {
-    return Object.entries(PRESETS)
-      .map(([k, p]) => `<button data-preset="${k}">${p.name.toUpperCase()}</button>`)
-      .join('');
+    return `<select id="ed-preset-pick"><option value="">LOAD A PRESET…</option>${Object.entries(PRESETS)
+      .map(([k, p]) => `<option value="${k}">${p.name.toUpperCase()}</option>`)
+      .join('')}</select>`;
   }
 }

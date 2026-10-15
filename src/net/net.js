@@ -2,7 +2,6 @@
 // Host: runs World, sends {t:'init'} once, then {t:'snap'} ~15 Hz.
 // Guest: sends {t:'cmd'}; renders an interpolated Mirror of the host state.
 import { buildSpec } from '../fleet.js';
-import { AIR_SUPPORT } from '../config.js';
 import { wrapAngle } from '../sim/world.js';
 import { generateMap } from '../sim/map.js';
 
@@ -91,7 +90,8 @@ export class Mirror {
     this.cp = { ...this.map.cp, progress: 0, owner: null, contested: false, score: { blue: 0, red: 0 } };
     this.contacts = { blue: new Map(), red: new Map() };
     this.jams = [];
-    this.airCd = { blue: {}, red: {} };
+    this.airWing = init.airWing || { blue: [], red: [] };
+    this.airCd = { blue: this.airWing.blue.map(() => 99), red: this.airWing.red.map(() => 99) };
     for (const s of init.ships) this.addShip(s);
   }
 
@@ -167,7 +167,7 @@ export class Mirror {
 
     // ships that appeared (freighters) or left the map
     for (const [id, B] of b.ships) {
-      if (!this.byId.has(id)) this.addShip({ id, side: SIDES[B[20]], cls: B[21], name: B[24] || 'MV', hull: B[20] === 2 ? 'CIVILIAN' : 'AIR SUPPORT', modules: [], x: B[1], z: B[2], heading: B[3] });
+      if (!this.byId.has(id)) this.addShip({ id, side: SIDES[B[20]], cls: B[21], name: B[24] || 'MV', hull: B[20] === 2 ? 'CIVILIAN' : B[24] || 'AIR SUPPORT', modules: Array.isArray(B[27]) ? B[27] : [], x: B[1], z: B[2], heading: B[3] });
     }
     if (this.ships.some((s) => !b.ships.has(s.id))) {
       this.ships = this.ships.filter((s) => b.ships.has(s.id));
@@ -199,7 +199,7 @@ export class Mirror {
       s.turn = B[17];
       s.launchQueue = new Array(B[18]).fill(0);
       s.chaffCd = B[19];
-      s.ammo = { skimmer: B[22][0], supersonic: B[22][1], cruise: B[22][2], heavy: B[22][3], light: B[22][4] };
+      s.ammo = { skimmer: B[22][0], supersonic: B[22][1], cruise: B[22][2], heavy: B[22][3], light: B[22][4], aam: B[22][5] || 0 };
       s.torps = (B[22][3] || 0) + (B[22][4] || 0);
       s.jamCd = B[23];
       s.alt = lerp(A[25] || 0, B[25] || 0, t);
@@ -231,7 +231,7 @@ export class Mirror {
       this.contacts[side] = new Map((b.contacts?.[side] || []).map(([id, x, z, level, ct]) => [id, { id, x, z, level, t: ct }]));
     }
     this.jams = (b.jams || []).map(([id, ship, sc, x, z, dir, half, range, jt, max]) => ({ id, ship, side: SIDES[sc], x, z, dir, half, range, t: jt, max }));
-    if (b.air) for (const side of ['blue', 'red']) this.airCd[side] = Object.fromEntries(Object.keys(AIR_SUPPORT).map((k, i) => [k, b.air[side][i] || 0]));
+    if (b.air) for (const side of ['blue', 'red']) this.airCd[side] = this.airWing[side].map((_, i) => b.air[side][i] || 0);
     if (b.cp) {
       const [progress, owner, sb, sr, contested] = b.cp;
       Object.assign(this.cp, { progress, owner: owner >= 0 ? SIDES[owner] : null, contested: !!contested, score: { blue: sb, red: sr } });

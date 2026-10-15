@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES, AIR_SUPPORT } from './config.js';
+import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES } from './config.js';
 import { World, radarRange, jammedAt, isCombatant, isAir, weaponRange } from './sim/world.js';
 import { AIController } from './sim/ai.js';
 import { Renderer } from './render/renderer.js';
@@ -14,7 +14,7 @@ import { Hud } from './ui/hud.js';
 import { Audio } from './audio/audio.js';
 import { Net, Mirror, createRoomCode } from './net/net.js';
 import { FleetEditor } from './ui/fleetEditor.js';
-import { BUDGET, fleetCost, presetFleet, randomFleet, validateFleet } from './fleet.js';
+import { BUDGET, fleetCost, presetFleet, randomFleet, validateFleet, AIRFRAMES } from './fleet.js';
 
 const $ = (id) => document.getElementById(id);
 const SNAP_RATE = 1 / 15;
@@ -203,6 +203,7 @@ class Game {
     for (const d of f.ships) counts[d.cls] = (counts[d.cls] || 0) + 1;
     const names = { ddg: 'DDG', ffg: 'FFG', fac: 'FAC', ssk: 'SSK' };
     const parts = Object.entries(counts).map(([c, n]) => `${n}×${names[c]}`);
+    if (f.air && f.air.length) parts.push(`+${f.air.length} AIR`);
     $('fleet-summary').innerHTML = `YOUR FLEET: <b>${parts.join(' ')}</b><br>${fleetCost(f)} / ${BUDGET} pts`;
   }
 
@@ -457,42 +458,48 @@ class Game {
       .filter((s) => s.spec.canJam);
   }
 
-  // Off-map air support: pick a mission, then click where (or whom) to send it.
-  airCooldown(key) {
-    const cd = this.state && this.state.airCd && this.state.airCd[this.side];
-    return cd ? cd[key] || 0 : 99;
+  // Off-map squadrons from our fleet design: pick one, then click where to
+  // send it, or an identified enemy ship if it carries anti-ship missiles.
+  airWing() {
+    return (this.state && this.state.airWing && this.state.airWing[this.side]) || [];
   }
 
-  toggleAirMode(key) {
-    const A = AIR_SUPPORT[key];
+  airCooldown(i) {
+    const cd = this.state && this.state.airCd && this.state.airCd[this.side];
+    return cd && cd[i] !== undefined ? cd[i] : 99;
+  }
+
+  toggleAirMode(i) {
+    const sq = this.airWing()[i];
     this.fireMode = false;
     this.jamMode = false;
-    const wait = Math.ceil(this.airCooldown(key));
-    if (wait > 0) {
+    if (!sq) {
       this.airMode = null;
-      this.hud.message(`${A.name.toUpperCase()}: available in ${wait}s`, 'warn');
       return this.audio.deny();
     }
-    this.airMode = this.airMode === key ? null : key;
+    const wait = Math.ceil(this.airCooldown(i));
+    if (wait > 0) {
+      this.airMode = null;
+      this.hud.message(`${sq.name.toUpperCase()}: ready in ${wait}s`, 'warn');
+      return this.audio.deny();
+    }
+    const strike = sq.modules.includes('asm');
+    this.airMode = this.airMode && this.airMode.i === i ? null : { i, sq, strike, orbit: AIRFRAMES[sq.cls].orbit };
     this.audio.blip(this.airMode ? 700 : 300, 0.08, 'triangle', 0.08);
-    if (this.airMode) this.hud.message(key === 'strike' ? 'STRIKE: click an identified enemy ship.' : `${A.name.toUpperCase()}: click where to send it.`, 'friend');
+    if (this.airMode) this.hud.message(`${sq.name.toUpperCase()}: click ${strike ? 'a target or a patrol point' : 'a patrol point'}`, 'friend');
   }
 
   callAirAt(sx, sy) {
-    const key = this.airMode;
+    const { i, strike } = this.airMode;
     this.airMode = null;
-    if (key === 'strike') {
-      const t = this.pickShip(sx, sy, (s) => s.side !== this.side && isCombatant(s) && !s.submerged && !isAir(s));
-      const c = t && this.contactPos(t);
-      if (!c || c.level < 1) {
-        this.hud.message('Strike needs an identified enemy ship.', 'warn');
-        return this.audio.deny();
-      }
-      this.issue({ type: 'air', mission: key, x: c.x, z: c.z, target: t.id });
+    const t = strike && this.pickShip(sx, sy, (s) => s.side !== this.side && isCombatant(s) && !s.submerged && !isAir(s));
+    const c = t && this.contactPos(t);
+    if (c && c.level > 0) {
+      this.issue({ type: 'air', squad: i, x: c.x, z: c.z, target: t.id });
     } else {
       const g = this.ground(sx, sy);
       if (!g) return;
-      this.issue({ type: 'air', mission: key, x: g.x, z: g.z });
+      this.issue({ type: 'air', squad: i, x: g.x, z: g.z });
       this.overlay.ping(g.x, g.z);
     }
     this.audio.order();
@@ -659,7 +666,10 @@ class Game {
     $('ed-done').onclick = () => this.closeEditor(true);
     $('ed-cancel').onclick = () => this.closeEditor(false);
     $('ed-presets').innerHTML = this.editor.presetsHTML();
-    $('ed-presets').querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => this.editor.preset(b.dataset.preset)));
+    $('ed-preset-pick').onchange = (e) => {
+      if (e.target.value) this.editor.preset(e.target.value);
+      e.target.value = '';
+    };
     $('opt-enemy').value = p.enemy;
     $('opt-enemy').onchange = (e) => {
       p.enemy = e.target.value;
@@ -879,10 +889,10 @@ class Game {
     else if (k === 'KeyJ') this.toggleJamMode();
     else if (k === 'KeyU') this.toggleDive();
     else if (k === 'KeyP') this.sonarPing();
-    else if (k === 'KeyI') this.toggleAirMode('cap');
-    else if (k === 'KeyO') this.toggleAirMode('strike');
-    else if (k === 'KeyK') this.toggleAirMode('mpa');
-    else if (k === 'KeyL') this.toggleAirMode('aew');
+    else if (k === 'KeyI') this.toggleAirMode(0);
+    else if (k === 'KeyO') this.toggleAirMode(1);
+    else if (k === 'KeyK') this.toggleAirMode(2);
+    else if (k === 'KeyL') this.toggleAirMode(3);
     else if (k === 'KeyZ') this.setSalvo(2);
     else if (k === 'KeyX') this.setSalvo(4);
     else if (k === 'KeyC') this.setSalvo(6);
@@ -1103,13 +1113,12 @@ class Game {
           break;
         case 'air':
           if (e.side === me) {
-            const A = AIR_SUPPORT[e.mission];
-            this.hud.message(`${A.name.toUpperCase()} inbound — ${A.desc}`, 'friend');
-            this.audio.say({ cap: 'Fighters on the way.', strike: 'Strike package inbound.', mpa: 'Patrol aircraft on the way.', aew: 'Early warning aircraft on the way.' }[e.mission]);
+            this.hud.message(`${e.name.toUpperCase()} inbound${e.strike ? ' — strike' : ''}`, 'friend');
+            this.audio.say(e.strike ? `${e.name}, inbound to strike.` : `${e.name}, on the way.`);
           }
           break;
         case 'rtb':
-          if (e.side === me) this.hud.message(`${AIR_SUPPORT[e.mission].name.toUpperCase()}: returning to base`, 'friend');
+          if (e.side === me) this.hud.message(`${String(e.name).toUpperCase()}: returning to base`, 'friend');
           break;
         case 'end':
           this.endT = 4.5;
@@ -1142,7 +1151,7 @@ class Game {
       }
       const seen = s.side === this.side || this.visible.has(s.id);
       if (seen && Math.hypot(s.x - cam.x, s.alt - cam.y, s.z - cam.z) < 700 && this.audio.can('flyby' + s.id, 15)) {
-        this.audio.flyby(s.x, s.alt, s.z, s.cls === 'mpa' || s.cls === 'aew');
+        this.audio.flyby(s.x, s.alt, s.z, s.cls === 'mpa');
       }
     }
   }

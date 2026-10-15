@@ -31,7 +31,7 @@ Each battle has a random map: islands (they block radar and missiles), merchant 
 
 ### Fleet creator
 
-Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ships.
+Click **FLEET CREATOR** on the main menu. You have 2,000 points for up to 6 ships and 4 air squadrons. Click a design on the left, then click module tiles on the right to fill its slots; click a filled slot to empty it. Hover anything for a one-line description.
 
 - **Hulls:** Corvette (70 pts, 2 slots), Frigate (140 pts, 4 slots), Destroyer (220 pts, 6 slots).
 - **Missile batteries:** sea-skimmer (4 missiles, 4.2 km, weaves at the end), supersonic (2, 3.3 km, hard to intercept), cruise (2, 7.5 km, flies high then dives).
@@ -41,7 +41,7 @@ Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ship
 - **Jammer arrays:** noise jammer (narrow, 7 km), barrage jammer (wide, 4 km).
 - **Submarine** hull (170 pts, 3 slots): torpedo tubes, missile batteries, decoys. Built-in sonar.
 - **Undersea:** ASW torpedoes (homing, for hunting subs) and a sonar array for surface ships.
-- **Aircraft** (frigate/destroyer decks): ASW helicopter (dips sonar, drops torpedoes on subs), recon drone (fast flying radar), strike drone (2 sea-skimmers).
+- **Hangars** (frigate/destroyer): carry your helicopter or drone design.
 - **ENEMY** on the menu picks the AI fleet: Standard, Random, or Mirror (your own design). In multiplayer each player brings their own fleet.
 
 ### Radar and jamming
@@ -52,7 +52,8 @@ Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ship
 - **Sonar:** passive sonar hears units by their noise — fast ships are loud, submerged subs are quiet — and gives an estimated position. An active ping (P) reveals everything nearby exactly but gives you away.
 - **Submarines** are invisible to radar while submerged (U to surface/dive). Torpedoes run underwater: SAMs and CIWS can't stop them, decoys can.
 - **Aircraft** can be selected and ordered like ships; with no orders they orbit their carrier. Helicopters hover to dip sonar and attack submarines automatically.
-- **Air support** comes from off the map, on a cooldown: **I** fighter CAP (air-to-air missiles at enemy aircraft), **O** strike package (two jets fire sea-skimmers at an identified ship), **K** maritime patrol (big radar, sonobuoys, torpedoes for submarines), **L** AEW radar plane (11 km sweep). They fly in from your edge of the map, stay for a while, then fly home. The AI uses them too.
+- **Air wing**: up to 4 squadrons, designed in the fleet creator like ships: pick an airframe (fighter pair, attack-jet pair, patrol plane) and fill its slots with air-to-air missiles, anti-ship missiles, torpedoes, sonar, radar, AEW radar, a jammer pod, flares or drop tanks. In battle, **I / O / K / L** call them in from your edge of the map: click a patrol point, or an identified enemy ship to strike it. The AI uses its air wing too.
+- **Deck aircraft**: a helicopter or drone hangar on a frigate or destroyer carries your helicopter or drone design; their loadouts are edited in the fleet creator too.
 - **Islands** block radar, line of sight and sea-skimming missiles. Some always flank the control point and others form channels between the fleets. A ship within 350 m of a coast hides in radar land clutter: enemy radar detects it at half range (the card shows COAST MASK).
 - **Detection**: the fleets start 12 km apart, beyond radar range. Radar sees big hulls farther than small ones (a fast attack craft at 60 % of the range a destroyer is seen at; a surfaced submarine at 45 %). Intercepting an enemy radar or jammer gives only a rough, drifting position (error up to 15 % of the distance), never an exact track.
 - **Neutral traffic**: freighters enter and leave from any edge of the map. Many follow a shipping lane (not drawn on the map) that changes course at several turning points and runs through the control point. Airliners cross high overhead (air defences ignore them, but they appear as unknown radar contacts). Whales wander the area and sound like submarines on passive sonar; an active ping identifies them.

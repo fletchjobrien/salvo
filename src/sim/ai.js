@@ -129,35 +129,36 @@ export class AIController {
     }
   }
 
-  // Off-map air support: strikes on the target, fighters when their
-  // aircraft are about, radar planes and patrol planes to find them.
+  // Off-map squadrons, by what they carry: anti-ship missiles strike the
+  // target, air-to-air missiles go after their aircraft, radar and sonar
+  // planes search.
   callAirSupport(enemies, cx, cz) {
     const w = this.world;
-    const cd = w.airCd[this.side];
-    if (!cd) return;
+    const wing = w.airWing[this.side] || [];
+    const cd = w.airCd[this.side] || [];
     const foe = enemyOf(this.side);
     const cp = w.cp;
-    const call = (mission, x, z, target) => this.cmd({ type: 'air', mission, x, z, target });
-    if (enemies.length && cd.strike <= 0) {
-      const t = enemies.find((e) => !e.ship.submerged);
-      if (t) call('strike', t.x, t.z, t.ship.id);
+    const planes = [];
+    let sub = null;
+    for (const c of w.contacts[this.side].values()) {
+      const s = w.byId.get(c.id);
+      if (!s || !s.alive) continue;
+      if (s.side === foe && isAir(s)) planes.push(c);
+      if (s.submerged && !sub) sub = c;
     }
-    if (cd.cap <= 0) {
-      const planes = [];
-      for (const c of w.contacts[this.side].values()) {
-        const s = w.byId.get(c.id);
-        if (s && s.alive && s.side === foe && isAir(s)) planes.push(c);
-      }
-      if (planes.length) call('cap', (planes[0].x + cx) / 2, (planes[0].z + cz) / 2);
-    }
-    if (cd.aew <= 0 && !enemies.length) call('aew', (cx + cp.x) / 2, (cz + cp.z) / 2);
-    if (cd.mpa <= 0 && (!enemies.length || Math.random() < 0.05)) {
-      const sub = [...w.contacts[this.side].values()].find((c) => {
-        const s = w.byId.get(c.id);
-        return s && s.alive && s.submerged;
-      });
-      call('mpa', sub ? sub.x : cp.x, sub ? sub.z : cp.z);
-    }
+    wing.forEach((sq, i) => {
+      if (cd[i] > 0) return;
+      const m = sq.modules;
+      const call = (x, z, target) => this.cmd({ type: 'air', squad: i, x, z, target });
+      if (m.includes('asm')) {
+        const t = enemies.find((e) => !e.ship.submerged);
+        if (t) call(t.x, t.z, t.ship.id);
+      } else if (m.includes('aam')) {
+        if (planes.length) call((planes[0].x + cx) / 2, (planes[0].z + cz) / 2);
+      } else if (m.includes('atorp') || m.includes('dip')) {
+        if (sub || !enemies.length) call(sub ? sub.x : cp.x, sub ? sub.z : cp.z);
+      } else if (!enemies.length) call((cx + cp.x) / 2, (cz + cp.z) / 2);
+    });
   }
 
   // Chaff and defensive jamming when missiles come for our ships.

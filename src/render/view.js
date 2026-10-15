@@ -330,6 +330,7 @@ export class GameView {
     let v = this.ships.get(s.id);
     if (!v) {
       const model = buildShipModel(s.cls, s.side);
+      if (model.dome) model.dome.visible = !!(s.spec && s.spec.modules && s.spec.modules.includes('aew'));
       this.scene.add(model.group);
       v = {
         model,

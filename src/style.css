@@ -184,89 +184,6 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 #btn-fleet { font-family: 'Press Start 2P', monospace; font-size: 11px; padding: 10px; border-color: rgba(255,191,90,0.6); }
 #btn-fleet:hover { background: rgba(110, 70, 20, 0.9); border-color: var(--amber); }
 
-#editor { background: rgba(1, 8, 13, 0.78); backdrop-filter: blur(3px); }
-.ed-wrap {
-  width: min(1180px, 96vw); height: min(720px, 94vh);
-  background: var(--panel); border: 2px solid var(--line);
-  box-shadow: 0 0 0 4px rgba(0,0,0,0.4), 0 30px 80px rgba(0,0,0,0.6);
-  display: flex; flex-direction: column; padding: 14px 16px; gap: 10px;
-}
-.ed-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.ed-head h2 { margin: 0; text-align: left; }
-.ed-budget { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 520px; }
-.ed-budget .bar { flex: 1; height: 12px; background: rgba(0,0,0,0.6); border: 1px solid var(--line); }
-.ed-budget .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #3fb6e0, #7dff9a); transition: width 0.25s; }
-.ed-budget .bar i.hot { background: linear-gradient(90deg, #ffbf5a, #ff6a3d); }
-#ed-budget-text { color: #fff; font-size: 22px; white-space: nowrap; min-width: 150px; text-align: right; }
-.ed-body { flex: 1; display: grid; grid-template-columns: 250px 1fr 330px; gap: 12px; min-height: 0; }
-.ed-col { overflow-y: auto; min-height: 0; }
-.ed-col::-webkit-scrollbar { width: 6px; }
-.ed-col::-webkit-scrollbar-thumb { background: var(--line); }
-
-.ed-ship { position: relative; border: 2px solid rgba(98,216,255,0.2); background: rgba(10,40,56,0.55); padding: 6px 8px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.1s, transform 0.1s; }
-.ed-ship:hover { border-color: var(--cyan); transform: translateX(2px); }
-.ed-ship.sel { border-color: var(--cyan); background: rgba(20, 70, 95, 0.9); box-shadow: 0 0 12px rgba(98,216,255,0.3); }
-.ed-ship .r1, .ed-ship .r2 { display: flex; justify-content: space-between; align-items: center; padding-right: 18px; }
-.ed-ship .r1 { color: #fff; font-size: 20px; }
-.ed-ship .r1 span:last-child { color: var(--amber); font-size: 17px; }
-.ed-ship .r2 { color: #7fa9ba; font-size: 16px; }
-.pips { display: flex; gap: 2px; }
-.pips i { width: 8px; height: 8px; border: 1px solid rgba(255,255,255,0.25); }
-.pips i.weapons { background: #ff7a5c; } .pips i.defense { background: #62d8ff; }
-.pips i.sensors { background: #b98cff; } .pips i.mobility { background: #7dff9a; }
-.ed-ship .x { position: absolute; top: 4px; right: 4px; padding: 0 6px; font-size: 16px; line-height: 18px; background: transparent; border: none; color: #7fa9ba; }
-.ed-ship .x:hover { color: var(--red); background: transparent; }
-.ed-adds { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-.ed-add { text-align: left; font-size: 17px; display: flex; justify-content: space-between; align-items: baseline; border-style: dashed; }
-.ed-add small { color: #7fa9ba; font-size: 15px; }
-.ed-count { color: #7fa9ba; font-size: 16px; margin-top: 6px; text-align: center; }
-
-.ed-mid { display: flex; flex-direction: column; gap: 8px; }
-#ed-preview { width: 100%; max-width: 400px; aspect-ratio: 200 / 110; align-self: center; image-rendering: pixelated; background: radial-gradient(ellipse at 50% 70%, rgba(40,110,140,0.35), rgba(0,0,0,0) 70%); border: 1px solid rgba(98,216,255,0.15); }
-.ed-name { display: flex; align-items: center; gap: 10px; }
-.ed-name input { flex: 1; font-size: 22px; padding: 2px 8px; cursor: text; text-transform: uppercase; }
-.ed-name span { color: #7fa9ba; font-size: 16px; white-space: nowrap; }
-.ed-blurb { color: #9fc8d8; font-size: 17px; }
-.slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-.slot { height: 44px; font-size: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2px; line-height: 1; }
-.slot small { color: rgba(255,255,255,0.6); font-size: 14px; margin-top: 2px; }
-.slot.empty { border: 2px dashed rgba(98,216,255,0.2); color: rgba(159,200,216,0.4); }
-.slot.weapons { border-color: #ff7a5c; background: rgba(110, 35, 20, 0.7); }
-.slot.defense { border-color: #62d8ff; background: rgba(15, 60, 85, 0.8); }
-.slot.sensors { border-color: #b98cff; background: rgba(55, 30, 95, 0.8); }
-.slot.mobility { border-color: #7dff9a; background: rgba(20, 75, 40, 0.8); }
-.slot:hover:not(.empty) { filter: brightness(1.3); text-decoration: line-through; }
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
-.stat { display: grid; grid-template-columns: 62px 1fr 64px; align-items: center; gap: 6px; font-size: 16px; color: #7fa9ba; }
-.stat b { color: #fff; font-weight: normal; text-align: right; }
-.sb { height: 6px; background: rgba(0,0,0,0.6); }
-.sb i { display: block; height: 100%; background: var(--cyan); transition: width 0.25s; }
-.tags { grid-column: 1 / -1; display: flex; gap: 6px; min-height: 20px; }
-.tags em { font-style: normal; font-size: 15px; padding: 0 6px; border: 1px solid; }
-.tags .jam { color: #c9a6ff; border-color: #8d5cff; }
-.tags .esm { color: var(--amber); border-color: rgba(255,191,90,0.6); }
-.ed-warn { color: var(--amber); font-size: 16px; min-height: 18px; }
-
-.cat { margin-bottom: 8px; }
-.ch { font-family: 'Press Start 2P', monospace; font-size: 9px; letter-spacing: 0.15em; margin: 4px 0; }
-.ch.weapons { color: #ff7a5c; } .ch.defense { color: #62d8ff; } .ch.sensors { color: #b98cff; } .ch.mobility { color: #7dff9a; }
-.part { display: grid; grid-template-columns: 1fr auto; width: 100%; text-align: left; margin-bottom: 4px; padding: 4px 8px; font-size: 18px; border-left-width: 4px; }
-.part.weapons { border-left-color: #ff7a5c; } .part.defense { border-left-color: #62d8ff; }
-.part.sensors { border-left-color: #b98cff; } .part.mobility { border-left-color: #7dff9a; }
-.part .pc { color: var(--amber); }
-.part .pd { grid-column: 1 / -1; color: #7fa9ba; font-size: 15px; line-height: 1.05; }
-.part:disabled { opacity: 0.3; }
-
-.ed-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ed-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: #7fa9ba; font-size: 16px; }
-#ed-presets { display: flex; gap: 6px; flex-wrap: wrap; }
-#ed-presets button { font-size: 16px; padding: 3px 8px; }
-.ed-btns { display: flex; gap: 8px; }
-@media (max-width: 900px) {
-  .ed-body { grid-template-columns: 1fr; overflow-y: auto; }
-  .ed-col { overflow: visible; }
-}
-
 /* ---------- control point bar */
 #cpbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; font-size: 20px; pointer-events: none !important; text-shadow: 0 2px 0 #000; }
 #cpbar .us { color: var(--cyan); min-width: 30px; text-align: right; }
@@ -280,24 +197,10 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 #cpbar em.held { color: var(--cyan); }
 #cpbar em.lost { color: var(--red); }
 
-/* fleet creator: module categories */
-.pips i.missiles { background: #ff7a5c; } .pips i.guns { background: #ffbf5a; } .pips i.ew { background: #b98cff; } .pips i.sensors { background: #7dff9a; }
-.slot.missiles { border-color: #ff7a5c; background: rgba(110, 35, 20, 0.7); }
-.slot.guns { border-color: #ffbf5a; background: rgba(100, 70, 15, 0.75); }
-.slot.sensors { border-color: #7dff9a; background: rgba(20, 75, 40, 0.8); }
-.slot.ew { border-color: #b98cff; background: rgba(55, 30, 95, 0.8); }
-.ch.missiles { color: #ff7a5c; } .ch.guns { color: #ffbf5a; } .ch.sensors { color: #7dff9a; } .ch.ew { color: #b98cff; }
-.part.missiles { border-left-color: #ff7a5c; } .part.guns { border-left-color: #ffbf5a; } .part.sensors { border-left-color: #7dff9a; } .part.ew { border-left-color: #b98cff; }
-.slots { grid-template-columns: repeat(3, 1fr); }
-.stats .line { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 10px; font-size: 16px; color: #7fa9ba; border-top: 1px solid rgba(98,216,255,0.08); padding-top: 2px; }
-.stats .line b { color: #fff; font-weight: normal; text-align: right; }
-.pips i.air { background: #e0e6ea; } .slot.air { border-color: #e0e6ea; background: rgba(70, 80, 90, 0.8); }
-.ch.air { color: #e0e6ea; } .part.air { border-left-color: #e0e6ea; }
-
 /* ---------- off-map air support */
 #airpanel {
   position: absolute; right: 10px; top: calc(min(240px, calc(30vw + 20px)) + 40px);
-  width: 150px; display: flex; flex-direction: column; gap: 4px;
+  width: 180px; display: flex; flex-direction: column; gap: 4px;
 }
 #airpanel .lbl { color: #7fa9ba; font-size: 15px; letter-spacing: 0.08em; text-align: right; }
 #airpanel button {
@@ -308,5 +211,136 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 #airpanel button.ready { color: #ffe28a; border-color: rgba(255,226,138,0.55); }
 #airpanel button.ready i { background: #ffe28a; }
 #airpanel button.on { background: rgba(120, 95, 30, 0.9); color: #fff; }
-#airpanel .cd { color: inherit; opacity: 0.85; }
+#airpanel .cd { color: inherit; opacity: 0.85; flex: none; }
+#airpanel button span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 900px) { #airpanel { display: none; } }
+
+/* ---------- fleet creator */
+#editor { background: radial-gradient(ellipse at 50% 30%, rgba(8, 40, 58, 0.82), rgba(1, 6, 10, 0.94)); backdrop-filter: blur(4px); }
+.ed-wrap {
+  --missiles: #ff7a5c; --guns: #ffbf5a; --defense: #62d8ff; --sensors: #7dff9a; --ew: #c39bff; --air: #e8edf0;
+  width: min(1220px, 97vw); height: min(760px, 95vh);
+  display: flex; flex-direction: column; gap: 12px; padding: 16px 18px;
+  background: linear-gradient(180deg, rgba(6, 26, 38, 0.92), rgba(3, 14, 21, 0.94));
+  border: 1px solid rgba(98,216,255,0.35);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 30px 90px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.ed-head { display: flex; align-items: center; gap: 20px; }
+.ed-head h2 { margin: 0; font-size: 18px; letter-spacing: 0.3em; }
+.ed-budget { flex: 1; display: flex; align-items: center; gap: 14px; }
+.ed-budget .bar { flex: 1; height: 10px; background: rgba(0,0,0,0.55); border-radius: 5px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(98,216,255,0.25); }
+.ed-budget .bar i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #2f9fd0, #7dff9a); transition: width 0.3s; }
+.ed-budget .bar i.hot { background: linear-gradient(90deg, #ffbf5a, #ff6a3d); }
+#ed-budget-text { color: #7fa9ba; font-size: 20px; white-space: nowrap; min-width: 110px; }
+#ed-budget-text b { color: #fff; font-weight: normal; font-size: 26px; }
+.ed-btns { display: flex; gap: 8px; }
+.ed-btns button { font-size: 18px; }
+#ed-done { font-family: 'Press Start 2P', monospace; font-size: 11px; padding: 10px 22px; background: var(--cyan); color: var(--ink); border-color: var(--cyan); }
+#ed-done:hover { filter: brightness(1.15); }
+
+.ed-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px 1fr 300px; gap: 16px; }
+.ed-col { overflow-y: auto; min-height: 0; padding-right: 4px; }
+.ed-col::-webkit-scrollbar { width: 5px; }
+.ed-col::-webkit-scrollbar-thumb { background: rgba(98,216,255,0.3); border-radius: 3px; }
+
+/* roster */
+.ed-sec { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 2px 6px; font-family: 'Press Start 2P', monospace; font-size: 8px; letter-spacing: 0.2em; color: #7fa9ba; }
+.ed-sec:first-child { margin-top: 0; }
+.ed-sec em { font-style: normal; font-family: inherit; color: #4f7585; }
+.ed-unit {
+  position: relative; display: grid; grid-template-columns: 74px 1fr; grid-template-rows: auto auto; column-gap: 8px;
+  padding: 7px 8px; margin-bottom: 5px; cursor: pointer; border-radius: 4px;
+  background: rgba(14, 48, 66, 0.45); box-shadow: inset 0 0 0 1px rgba(98,216,255,0.12);
+  transition: background 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.ed-unit:hover { background: rgba(20, 66, 90, 0.6); transform: translateX(2px); }
+.ed-unit.sel { background: rgba(26, 86, 115, 0.7); box-shadow: inset 0 0 0 1px var(--cyan), 0 0 14px rgba(98,216,255,0.2); }
+.ed-unit .sil { grid-row: 1 / 3; width: 74px; height: 28px; align-self: center; color: #9fd8ee; }
+.ed-unit.sel .sil { color: #fff; }
+.ed-unit .nm { color: #fff; font-size: 18px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 14px; }
+.ed-unit .ft { display: flex; justify-content: space-between; align-items: center; margin-top: 3px; }
+.ed-unit .ft b { color: var(--amber); font-weight: normal; font-size: 16px; }
+.ed-unit kbd { font-family: inherit; font-size: 14px; color: var(--ink); background: #ffe28a; border-radius: 2px; padding: 0 3px; margin-right: 5px; }
+.ed-unit .x { position: absolute; top: 2px; right: 3px; padding: 0 5px; font-size: 16px; line-height: 16px; background: none; border: none; color: #5d8394; opacity: 0; }
+.ed-unit:hover .x { opacity: 1; }
+.ed-unit .x:hover { color: var(--red); background: none; }
+.pips { display: flex; gap: 3px; }
+.pips i { width: 7px; height: 7px; border-radius: 50%; background: rgba(159,200,216,0.2); }
+.pips i.missiles { background: var(--missiles); } .pips i.guns { background: var(--guns); } .pips i.defense { background: var(--defense); }
+.pips i.sensors { background: var(--sensors); } .pips i.ew { background: var(--ew); } .pips i.air { background: var(--air); }
+.ed-adds { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 4px; margin-bottom: 4px; }
+.ed-new { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 2px 3px; border: 1px dashed rgba(98,216,255,0.3); background: rgba(5, 22, 32, 0.5); border-radius: 4px; }
+.ed-new .sil { width: 44px; height: 16px; color: #7fb6ca; }
+.ed-new b { font-weight: normal; font-size: 14px; color: var(--amber); }
+.ed-new:hover:not(:disabled) { border-style: solid; background: rgba(20, 66, 90, 0.6); }
+.ed-new:hover .sil { color: #fff; }
+
+/* design */
+.ed-mid { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.ed-stage { position: relative; border-radius: 6px; overflow: hidden; background: radial-gradient(ellipse at 50% 75%, rgba(40,120,155,0.35), rgba(2,12,18,0.2) 70%); box-shadow: inset 0 0 0 1px rgba(98,216,255,0.15); }
+#ed-preview { display: block; width: 100%; aspect-ratio: 320 / 150; image-rendering: pixelated; }
+#ed-title { position: absolute; left: 12px; top: 10px; right: 12px; }
+#ed-title input, #ed-title .fixed { font-size: 26px; padding: 0 4px; width: min(320px, 100%); background: transparent; border: none; border-bottom: 1px solid transparent; color: #fff; text-transform: uppercase; cursor: text; }
+#ed-title input:hover, #ed-title input:focus { border-bottom-color: rgba(98,216,255,0.5); }
+#ed-title .sub { color: #7fa9ba; font-size: 16px; letter-spacing: 0.06em; padding-left: 4px; }
+#ed-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.slot {
+  position: relative; height: 82px; padding: 6px 4px 4px; border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 15px; line-height: 1; color: #fff; border: none;
+  background: rgba(16, 52, 70, 0.6); box-shadow: inset 0 0 0 1px currentColor;
+}
+.slot .ic { width: 30px; height: 30px; }
+.slot span { color: #fff; }
+.slot em { position: absolute; top: 4px; right: 6px; font-style: normal; font-size: 13px; opacity: 0.8; }
+.slot.empty { color: rgba(98,216,255,0.25); box-shadow: inset 0 0 0 1px rgba(98,216,255,0.2); background: repeating-linear-gradient(135deg, rgba(98,216,255,0.03) 0 6px, transparent 6px 12px); }
+.slot.empty span { color: rgba(98,216,255,0.35); font-size: 26px; }
+.slot.missiles { color: var(--missiles); background: rgba(110, 40, 24, 0.45); }
+.slot.guns { color: var(--guns); background: rgba(100, 70, 18, 0.45); }
+.slot.defense { color: var(--defense); background: rgba(15, 60, 85, 0.6); }
+.slot.sensors { color: var(--sensors); background: rgba(20, 75, 40, 0.45); }
+.slot.ew { color: var(--ew); background: rgba(55, 32, 95, 0.5); }
+.slot.air { color: var(--air); background: rgba(70, 80, 90, 0.5); }
+button.slot:hover { background: rgba(130, 30, 20, 0.6); }
+button.slot:hover::after { content: '×'; position: absolute; top: 2px; left: 6px; color: #fff; font-size: 16px; }
+#ed-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+.st { display: grid; grid-template-columns: 112px 1fr 64px; align-items: center; gap: 8px; font-size: 15px; color: #7fa9ba; }
+.st span { display: flex; align-items: center; gap: 6px; letter-spacing: 0.04em; }
+.st .ic { width: 16px; height: 16px; color: #5d8fa3; }
+.st .sb { height: 6px; border-radius: 3px; background: rgba(0,0,0,0.5); overflow: hidden; }
+.st .sb i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #2f9fd0, #62d8ff); transition: width 0.3s; }
+.st b { color: #fff; font-weight: normal; text-align: right; }
+
+/* parts */
+.cat { margin-bottom: 12px; }
+.ch { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; font-family: 'Press Start 2P', monospace; font-size: 8px; letter-spacing: 0.18em; }
+.ch i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.ch.missiles { color: var(--missiles); } .ch.guns { color: var(--guns); } .ch.defense { color: var(--defense); }
+.ch.sensors { color: var(--sensors); } .ch.ew { color: var(--ew); } .ch.air { color: var(--air); }
+.cat .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.part {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 2px 5px; border-radius: 5px; border: none; font-size: 14px; line-height: 1;
+  background: rgba(12, 42, 58, 0.55); box-shadow: inset 0 0 0 1px rgba(98,216,255,0.12);
+}
+.part .ic { width: 26px; height: 26px; }
+.part.missiles .ic { color: var(--missiles); } .part.guns .ic { color: var(--guns); } .part.defense .ic { color: var(--defense); }
+.part.sensors .ic { color: var(--sensors); } .part.ew .ic { color: var(--ew); } .part.air .ic { color: var(--air); }
+.part .pn { color: #dbeef6; white-space: nowrap; }
+.part .pc { color: var(--amber); font-size: 13px; }
+.part em { position: absolute; top: 3px; right: 5px; font-style: normal; font-size: 12px; color: #7fa9ba; }
+.part:hover { background: rgba(26, 86, 115, 0.7); box-shadow: inset 0 0 0 1px var(--cyan); }
+.part[aria-disabled="true"] { opacity: 0.3; }
+.part[aria-disabled="true"]:hover { background: rgba(12, 42, 58, 0.55); box-shadow: inset 0 0 0 1px rgba(255,120,90,0.4); }
+
+.ed-foot { display: flex; align-items: center; gap: 16px; min-height: 30px; }
+#ed-presets select { font-size: 16px; padding: 3px 8px; }
+#ed-info { flex: 1; color: #bfe3f1; font-size: 18px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) {
+  .ed-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .ed-col { overflow: visible; }
+  .ed-head { flex-wrap: wrap; }
+}
+
+/* air wing panel icons */
+#airpanel button .ic, #airpanel button .sil { width: 22px; height: 12px; vertical-align: -1px; margin-right: 4px; color: inherit; }

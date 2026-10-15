@@ -1,7 +1,7 @@
 // Crisp 2D tactical overlay drawn above the pixelated 3D view: NTDS-style
 // contact symbols, missile tracks, orders, selection and the minimap.
 import * as THREE from 'three';
-import { CLASSES, AIR_SUPPORT } from '../config.js';
+import { CLASSES } from '../config.js';
 import { radarRange } from '../sim/world.js';
 import { islandRadius } from '../sim/map.js';
 
@@ -75,17 +75,17 @@ export class Overlay {
     const camDist = g.rig.dist;
     const side = g.side;
 
-    // Range outlines for the selection: one merged outline per kind.
+    // Range for the selection: one outline, the union of every selected
+    // ship's farthest reach (radar or weapon), with weapon reach as a faint
+    // tint inside it.
     const selShips = [...g.selected].map((id) => g.shipById(id)).filter((s) => s && s.alive && s.side === side);
     if (selShips.length) {
-      const MR = { skimmer: 4200, supersonic: 3300, cruise: 7500, heavy: 3600, light: 2800 };
-      const circles = (fn) =>
-        selShips
-          .map((s) => ({ x: s.x, z: s.z, r: fn(s) }))
-          .filter((c) => c.r > 0);
-      this.groundUnion(circles((s) => (s.radar && !s.submerged ? radarRange(s) : 0)), 'rgba(140,255,170,0.22)');
-      this.groundUnion(circles((s) => Math.max(0, ...Object.entries(s.ammo || {}).filter(([, n]) => n > 0).map(([k]) => MR[k]))), 'rgba(255,190,90,0.26)');
-      this.groundUnion(circles((s) => Math.max(0, ...s.spec.guns.map((q) => q.range))), 'rgba(98,216,255,0.22)');
+      const MR = { skimmer: 4200, supersonic: 3300, cruise: 7500, heavy: 3600, light: 2800, aam: 4200 };
+      const weapon = (s) => Math.max(0, ...Object.entries(s.ammo || {}).filter(([, n]) => n > 0).map(([k]) => MR[k] || 0), ...s.spec.guns.map((q) => q.range));
+      const sensor = (s) => (s.radar !== false && !s.submerged ? radarRange(s) : 0);
+      const circles = (fn) => selShips.map((s) => ({ x: s.x, z: s.z, r: fn(s) })).filter((c) => c.r > 0);
+      this.groundUnionFill(circles(weapon), 'rgba(255,190,90,0.05)');
+      this.groundUnion(circles((s) => Math.max(weapon(s), sensor(s))), 'rgba(190,235,255,0.32)');
     }
 
     this.drawMapLayer(g);
@@ -229,7 +229,7 @@ export class Overlay {
       }
       if (sel) this.brackets(p.x, p.y, 14, col);
       const targeted = [...g.selected].some((id) => g.shipById(id)?.target === s.id);
-      if (!friendly && (targeted || ((g.fireMode || g.airMode === 'strike') && hover))) {
+      if (!friendly && (targeted || ((g.fireMode || (g.airMode && g.airMode.strike)) && hover))) {
         const t = performance.now() * 0.004;
         ctx.save();
         ctx.translate(p.x, p.y);
@@ -304,7 +304,7 @@ export class Overlay {
     }
 
     if (g.airMode && g.mouse) {
-      const A = AIR_SUPPORT[g.airMode];
+      const A = g.airMode;
       const { x, y } = g.mouse;
       const gp = g.ground(x, y);
       if (gp && A.orbit) this.groundCircle(gp.x, gp.z, A.orbit, 'rgba(232,238,242,0.55)', [5, 5]);
@@ -318,7 +318,7 @@ export class Overlay {
       ctx.stroke();
       ctx.font = `16px ${FONT}`;
       ctx.fillStyle = AIRC;
-      ctx.fillText(`${A.short} — ${g.airMode === 'strike' ? 'PICK TARGET' : 'CLICK TO SEND'}`, x + 16, y + 26);
+      ctx.fillText(`${A.sq.name.toUpperCase()} — ${A.strike ? 'TARGET OR PATROL' : 'PATROL HERE'}`, x + 16, y + 26);
     }
 
     if (g.jamMode && g.mouse) {
@@ -414,7 +414,8 @@ export class Overlay {
     for (const rp of this.radarPings) {
       rp.t += dt;
       const s = g.shipById(rp.id);
-      if (!s || (!g.selected.has(s.id) && !rp.sonar && !rp.blind)) continue;
+      // ping rings only for a single selected ship; a group shows its outline
+      if (!s || ((!g.selected.has(s.id) || g.selected.size > 1) && !rp.sonar && !rp.blind)) continue;
       const dur = rp.sonar ? 1.8 : 0.9;
       const k = Math.min(1, rp.t / dur);
       const a = (1 - k) * (rp.blind ? 0.5 : 0.22);
@@ -500,7 +501,7 @@ export class Overlay {
         ctx.stroke();
       }
       ctx.globalAlpha = fade;
-      ctx.strokeStyle = (g.fireMode || g.airMode === 'strike') && hover ? HOSTILE : UNKNOWN;
+      ctx.strokeStyle = (g.fireMode || (g.airMode && g.airMode.strike)) && hover ? HOSTILE : UNKNOWN;
       ctx.lineWidth = hover ? 1.6 : 1.2;
       ctx.beginPath();
       ctx.moveTo(p.x, p.y - 4.5);
@@ -540,7 +541,7 @@ export class Overlay {
       ctx.fillText(s.spec.bio ? 'BIOLOGIC' : s.name.toUpperCase(), p.x, p.y - 12);
       ctx.textAlign = 'left';
     }
-    if ((g.fireMode || g.airMode === 'strike') && hover) this.brackets(p.x, p.y, 14, HOSTILE);
+    if ((g.fireMode || (g.airMode && g.airMode.strike)) && hover) this.brackets(p.x, p.y, 14, HOSTILE);
   }
 
   // Neutral symbols are squares (NTDS): full for surface, top half for air,
@@ -644,7 +645,7 @@ export class Overlay {
     ctx.beginPath();
     for (let i = 0; i < circles.length; i++) {
       const c = circles[i];
-      const N = 120;
+      const N = 360;
       let started = false;
       for (let k = 0; k <= N; k++) {
         const a = (k / N) * Math.PI * 2;
@@ -667,6 +668,29 @@ export class Overlay {
       }
     }
     ctx.stroke();
+  }
+
+  // Filled union of ground circles: one path, so overlaps don't darken.
+  groundUnionFill(circles, color) {
+    if (!circles.length) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (const c of circles) {
+      const pts = [];
+      for (let k = 0; k < 72; k++) {
+        const a = (k / 72) * Math.PI * 2;
+        const p = this.project(c.x + Math.cos(a) * c.r, 0, c.z + Math.sin(a) * c.r);
+        if (!p.ok) break;
+        pts.push(p);
+      }
+      if (pts.length < 72) continue;
+      // same winding for every circle, so 'nonzero' fills the union once
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (const p of pts) ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+    }
+    ctx.fill('nonzero');
   }
 
   cross(x, y, r, color) {
@@ -797,22 +821,16 @@ export class Overlay {
       ctx.stroke();
     }
 
-    // radar coverage: filled when radiating, dashed edge when silent
+    // radar coverage: one merged area for every radiating unit
+    ctx.beginPath();
     for (const s of g.state.ships) {
-      if (s.side !== g.side || !s.alive) continue;
+      if (s.side !== g.side || !s.alive || s.radar === false || s.submerged) continue;
       const [px, py] = P(s.x, s.z);
-      ctx.beginPath();
+      ctx.moveTo(px + radarRange(s) * v.scale, py);
       ctx.arc(px, py, radarRange(s) * v.scale, 0, Math.PI * 2);
-      if (s.radar === false) {
-        ctx.setLineDash([2, 4]);
-        ctx.strokeStyle = 'rgba(143,163,173,0.3)';
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else {
-        ctx.fillStyle = 'rgba(98,216,255,0.04)';
-        ctx.fill();
-      }
     }
+    ctx.fillStyle = 'rgba(98,216,255,0.06)';
+    ctx.fill('nonzero');
 
     // one quiet sweep line from the fleet centre
     const own = g.state.ships.filter((s) => s.side === g.side && s.alive);

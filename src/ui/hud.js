@@ -1,7 +1,10 @@
-import { CLASSES, SPEED_LEVELS, KNOTS, AIR_SUPPORT, COAST_MASK } from '../config.js';
+import { CLASSES, SPEED_LEVELS, KNOTS, COAST_MASK } from '../config.js';
+import { AIRFRAMES, AIR_MODULES } from '../fleet.js';
+import { icon } from './icons.js';
 import { nearCoast } from '../sim/map.js';
 
-const AIR_KEYS = { cap: 'I', strike: 'O', mpa: 'K', aew: 'L' };
+const AIR_KEYS = ['I', 'O', 'K', 'L'];
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,40 +23,42 @@ export class Hud {
     this.ordersKey = '';
     this.t = 0;
     this.messages = [];
-    this.buildAir();
   }
 
-  // Off-map air support: one button per mission with its cooldown.
-  buildAir() {
+  // Off-map squadrons from the fleet design: one button each, with its
+  // cooldown. Rebuilt when the air wing changes (a new battle).
+  buildAir(wing) {
     const g = this.g;
     this.airPanel = $('airpanel');
-    this.airBtns = {};
-    this.airPanel.innerHTML = '<div class="lbl">AIR SUPPORT</div>';
-    for (const [k, A] of Object.entries(AIR_SUPPORT)) {
+    this.airBtns = [];
+    this.airKey = wing.map((q) => q.name + q.cls).join('|');
+    this.airPanel.innerHTML = wing.length ? '<div class="lbl">AIR WING</div>' : '';
+    wing.forEach((sq, i) => {
       const b = document.createElement('button');
-      b.title = `${A.name}: ${A.desc}`;
-      b.innerHTML = `<span>[${AIR_KEYS[k]}] ${A.short}</span><span class="cd"></span><i></i>`;
+      b.title = `${AIRFRAMES[sq.cls].name}: ${sq.modules.map((m) => AIR_MODULES[m].short).join(' · ')}`;
+      b.innerHTML = `<span>${icon(sq.cls)}${AIR_KEYS[i]} ${esc(sq.name.toUpperCase())}</span><span class="cd"></span><i></i>`;
       b.addEventListener('mousedown', (e) => e.stopPropagation());
       b.addEventListener('click', (e) => {
         e.stopPropagation();
-        g.toggleAirMode(k);
+        g.toggleAirMode(i);
       });
       this.airPanel.appendChild(b);
-      this.airBtns[k] = { b, cd: b.querySelector('.cd'), bar: b.querySelector('i') };
-    }
+      this.airBtns.push({ b, cd: b.querySelector('.cd'), bar: b.querySelector('i'), max: AIRFRAMES[sq.cls].cooldown });
+    });
   }
 
   updateAir() {
     const g = this.g;
-    for (const [k, A] of Object.entries(AIR_SUPPORT)) {
-      const { b, cd, bar } = this.airBtns[k];
-      const w = g.airCooldown(k);
+    const wing = g.airWing();
+    if (!this.airBtns || this.airKey !== wing.map((q) => q.name + q.cls).join('|')) this.buildAir(wing);
+    this.airBtns.forEach(({ b, cd, bar, max }, i) => {
+      const w = g.airCooldown(i);
       const ready = w <= 0;
       cd.textContent = ready ? 'READY' : `${Math.ceil(w)}s`;
-      bar.style.width = `${ready ? 100 : Math.max(0, 100 - (w / A.cooldown) * 100)}%`;
+      bar.style.width = `${ready ? 100 : Math.max(0, 100 - (w / max) * 100)}%`;
       b.classList.toggle('ready', ready);
-      b.classList.toggle('on', g.airMode === k);
-    }
+      b.classList.toggle('on', !!g.airMode && g.airMode.i === i);
+    });
   }
 
   show(v) {

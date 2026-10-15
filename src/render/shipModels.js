@@ -609,5 +609,15 @@ export function buildShipModel(cls, side) {
   }
   if (c.bio) port.visible = stbd.visible = top.visible = radar.visible = false;
   if (cls === 'airliner') radar.visible = false;
-  return { group, body, turret, barrel, radar, rotor, def };
+  // patrol plane: rotodome, shown when an AEW radar is fitted
+  let dome = null;
+  if (cls === 'mpa') {
+    const b = new Builder();
+    b.cyl(0.4, 0.4, 2.6, 0, 3, -6, PALETTES[side].stack, 5);
+    b.cyl(5.2, 5.2, 0.9, 0, 4.6, -6, PALETTES[side].white, 14);
+    dome = new THREE.Mesh(b.build(), mat);
+    dome.visible = false;
+    body.add(dome);
+  }
+  return { group, body, turret, barrel, radar, rotor, dome, def };
 }
