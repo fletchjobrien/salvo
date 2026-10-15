@@ -31,7 +31,7 @@ export class AIController {
     const w = this.world;
     const all = w.ships.filter((s) => s.side === this.side && s.alive);
     const mine = all.filter((s) => !isAir(s));
-    const air = all.filter((s) => isAir(s));
+    const air = all.filter((s) => isAir(s) && !s.offmap);
     if (!mine.length) return;
     const ids = mine.map((s) => s.id);
     // Sonar: ping now and then to flush out submarines.
@@ -51,6 +51,7 @@ export class AIController {
     const cx = mine.reduce((a, s) => a + s.x, 0) / mine.length;
     const cz = mine.reduce((a, s) => a + s.z, 0) / mine.length;
     const cp = w.cp;
+    this.callAirSupport(enemies, cx, cz);
 
     if (!enemies.length) {
       if (this.moveT <= 0) {
@@ -121,6 +122,37 @@ export class AIController {
       // strike drones close with the target; recon drones keep it in view
       const drones = air.filter((a) => a.cls !== 'helo');
       if (drones.length) this.cmd({ type: 'move', ships: drones.map((a) => a.id), x: (target.x + cx) / 2, z: (target.z + cz) / 2 });
+    }
+  }
+
+  // Off-map air support: strikes on the target, fighters when their
+  // aircraft are about, radar planes and patrol planes to find them.
+  callAirSupport(enemies, cx, cz) {
+    const w = this.world;
+    const cd = w.airCd[this.side];
+    if (!cd) return;
+    const foe = enemyOf(this.side);
+    const cp = w.cp;
+    const call = (mission, x, z, target) => this.cmd({ type: 'air', mission, x, z, target });
+    if (enemies.length && cd.strike <= 0) {
+      const t = enemies.find((e) => !e.ship.submerged);
+      if (t) call('strike', t.x, t.z, t.ship.id);
+    }
+    if (cd.cap <= 0) {
+      const planes = [];
+      for (const c of w.contacts[this.side].values()) {
+        const s = w.byId.get(c.id);
+        if (s && s.alive && s.side === foe && isAir(s)) planes.push(c);
+      }
+      if (planes.length) call('cap', (planes[0].x + cx) / 2, (planes[0].z + cz) / 2);
+    }
+    if (cd.aew <= 0 && !enemies.length) call('aew', (cx + cp.x) / 2, (cz + cp.z) / 2);
+    if (cd.mpa <= 0 && (!enemies.length || Math.random() < 0.05)) {
+      const sub = [...w.contacts[this.side].values()].find((c) => {
+        const s = w.byId.get(c.id);
+        return s && s.alive && s.submerged;
+      });
+      call('mpa', sub ? sub.x : cp.x, sub ? sub.z : cp.z);
     }
   }
 

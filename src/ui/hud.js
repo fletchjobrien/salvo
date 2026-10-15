@@ -1,4 +1,6 @@
-import { CLASSES, SPEED_LEVELS, KNOTS } from '../config.js';
+import { CLASSES, SPEED_LEVELS, KNOTS, AIR_SUPPORT } from '../config.js';
+
+const AIR_KEYS = { cap: 'I', strike: 'O', mpa: 'K', aew: 'L' };
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +19,40 @@ export class Hud {
     this.ordersKey = '';
     this.t = 0;
     this.messages = [];
+    this.buildAir();
+  }
+
+  // Off-map air support: one button per mission with its cooldown.
+  buildAir() {
+    const g = this.g;
+    this.airPanel = $('airpanel');
+    this.airBtns = {};
+    this.airPanel.innerHTML = '<div class="lbl">AIR SUPPORT</div>';
+    for (const [k, A] of Object.entries(AIR_SUPPORT)) {
+      const b = document.createElement('button');
+      b.title = `${A.name}: ${A.desc}`;
+      b.innerHTML = `<span>[${AIR_KEYS[k]}] ${A.short}</span><span class="cd"></span><i></i>`;
+      b.addEventListener('mousedown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        g.toggleAirMode(k);
+      });
+      this.airPanel.appendChild(b);
+      this.airBtns[k] = { b, cd: b.querySelector('.cd'), bar: b.querySelector('i') };
+    }
+  }
+
+  updateAir() {
+    const g = this.g;
+    for (const [k, A] of Object.entries(AIR_SUPPORT)) {
+      const { b, cd, bar } = this.airBtns[k];
+      const w = g.airCooldown(k);
+      const ready = w <= 0;
+      cd.textContent = ready ? 'READY' : `${Math.ceil(w)}s`;
+      bar.style.width = `${ready ? 100 : Math.max(0, 100 - (w / A.cooldown) * 100)}%`;
+      b.classList.toggle('ready', ready);
+      b.classList.toggle('on', g.airMode === k);
+    }
   }
 
   show(v) {
@@ -51,7 +87,7 @@ export class Hud {
 
   buildCards() {
     const g = this.g;
-    const mine = g.state.ships.filter((s) => s.side === g.side);
+    const mine = g.state.ships.filter((s) => s.side === g.side && !s.offmap);
     mine.forEach((s, i) => {
       const el = document.createElement('div');
       el.className = 'card';
@@ -92,9 +128,10 @@ export class Hud {
     this.clock.textContent = `T+${String(Math.floor(tt / 60)).padStart(2, '0')}:${String(tt % 60).padStart(2, '0')}`;
     this.speedInd.textContent = g.paused ? 'PAUSED' : g.mode === 'guest' || g.mode === 'host' ? 'LIVE' : `${g.timeScale}×`;
     const enemies = g.state.ships.filter((s) => s.side !== g.side);
-    const mine = g.state.ships.filter((s) => s.side === g.side);
+    const mine = g.state.ships.filter((s) => s.side === g.side && !s.offmap);
     this.score.textContent = `SUNK ${enemies.filter((s) => !s.alive && !s.civ).length}  LOST ${mine.filter((s) => !s.alive).length}/${mine.length}`;
     this.updateControl();
+    this.updateAir();
 
     // threat alert
     const threats = g.state.missiles.filter((m) => m.kind !== 'sam' && m.side !== g.side && g.missileVisible(m));

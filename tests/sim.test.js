@@ -3,6 +3,7 @@
 // system (sensors, jamming, weapons, control point, civilians) gets used.
 import { World } from '../src/sim/world.js';
 import { AIController } from '../src/sim/ai.js';
+import { islandRadius } from '../src/sim/map.js';
 import { randomFleet, presetFleet, PRESETS, fleetCost, BUDGET } from '../src/fleet.js';
 
 // Every preset must fit the budget.
@@ -40,7 +41,7 @@ for (let r = 0; r < runs; r++) {
       if (!Number.isFinite(s[k])) throw new Error(`ship ${s.name} has non-finite ${k}`);
     }
     for (const i of w.map.islands) {
-      if (s.alive && Math.hypot(s.x - i.x, s.z - i.z) < i.r * 0.9) throw new Error(`ship ${s.name} ran aground`);
+      if (s.alive && !s.spec.air && Math.hypot(s.x - i.x, s.z - i.z) < islandRadius(i, s.x - i.x, s.z - i.z) * 0.9) throw new Error(`ship ${s.name} ran aground`);
     }
   }
   if (w.winner) resolved++;
@@ -53,7 +54,7 @@ for (let r = 0; r < runs; r++) {
 console.log('events', evCount);
 console.log('totals', totals, how, `avg battle ${(totalTime / runs).toFixed(0)}s`);
 
-const need = ['launch', 'gun', 'hit', 'splash', 'intercept', 'sink', 'contact', 'ident', 'ping', 'end', 'jam', 'cp'];
+const need = ['launch', 'gun', 'hit', 'splash', 'intercept', 'sink', 'contact', 'ident', 'ping', 'end', 'jam', 'cp', 'air', 'shotdown'];
 const missing = need.filter((k) => !evCount[k]);
 if (missing.length) {
   console.error('FAIL: events never fired:', missing);

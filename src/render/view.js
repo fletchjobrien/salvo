@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { CLASSES } from '../config.js';
 import { waveHeight } from '../sim/waves.js';
 import { toWorld } from '../sim/world.js';
+import { islandTerrain, shapeIsland } from '../sim/map.js';
 import { buildShipModel } from './shipModels.js';
 import { keepAlpha } from './effects.js';
 
@@ -149,7 +150,7 @@ function missileMesh(kind, side) {
 }
 
 function islands(scene) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 });
+  const mat = landMaterial();
   const rnd = mulberry(7);
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2 + rnd() * 0.4;
@@ -187,44 +188,76 @@ function mulberry(a) {
   };
 }
 
-// A playable island: same height profile as the simulation (map.js).
+// Land is drawn without the ink outline (the post pass only outlines
+// fragments with alpha 1), so the hills read as terrain, not as props.
+function landMaterial() {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 0 });
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  gl_FragColor.a = 0.5;');
+  };
+  return m;
+}
+
+// A playable island: a heightfield from the same terrain function as the
+// simulation (map.js), so what you see is what blocks ships and radar.
 function battleIsland(isl) {
-  const rnd = mulberry(isl.seed);
-  const rings = 9;
-  const segs = 28;
+  if (!isl.coast) shapeIsland(isl);
+  const rnd = mulberry(isl.seed + 11);
+  const R = isl.rmax * 1.12;
+  const n = Math.max(24, Math.min(56, Math.round((R * 2) / 34)));
+  const cell = (R * 2) / n;
+  const P = [];
+  for (let j = 0; j <= n; j++) {
+    const row = [];
+    for (let i = 0; i <= n; i++) {
+      // jitter the grid so the facets don't line up
+      const edge = i === 0 || j === 0 || i === n || j === n;
+      const x = -R + i * cell + (edge ? 0 : (rnd() - 0.5) * cell * 0.7);
+      const z = -R + j * cell + (edge ? 0 : (rnd() - 0.5) * cell * 0.7);
+      row.push([x, islandTerrain(isl, isl.x + x, isl.z + z), z]);
+    }
+    P.push(row);
+  }
   const pos = [];
   const col = [];
-  const H = (k) => isl.h * Math.pow(Math.max(0, 1 - k * k), 0.7);
-  const jitter = [];
-  for (let j = 0; j < segs; j++) jitter.push(0.85 + rnd() * 0.3);
-  const vert = (ri, j) => {
-    const k = ri / rings;
-    const a = (j / segs) * Math.PI * 2;
-    const rr = ri === rings ? isl.r * 1.06 : isl.r * k * jitter[j % segs];
-    const y = ri === rings ? -4 : H(Math.min(1, rr / isl.r)) * (0.9 + rnd() * 0.2);
-    return [Math.cos(a) * rr, y, Math.sin(a) * rr];
-  };
-  const grid = [];
-  for (let ri = 0; ri <= rings; ri++) {
-    grid.push([]);
-    for (let j = 0; j < segs; j++) grid[ri].push(ri === 0 ? [0, H(0), 0] : vert(ri, j));
-  }
-  const color = (y) => (y < isl.h * 0.08 ? [0.62, 0.56, 0.42] : y < isl.h * 0.6 ? [0.22, 0.33, 0.18] : [0.36, 0.35, 0.32]);
+  const sand = new THREE.Color(0.72, 0.62, 0.42);
+  const wetSand = new THREE.Color(0.45, 0.4, 0.3);
+  const grass = new THREE.Color(0.13, 0.25, 0.08);
+  const scrub = new THREE.Color(0.24, 0.29, 0.11);
+  const rock = new THREE.Color(0.3, 0.25, 0.19);
+  const tmp = new THREE.Color();
   const tri = (a, b, c) => {
+    const ymax = Math.max(a[1], b[1], c[1]);
+    if (ymax < -3) return; // deep under the sea: never seen
     pos.push(...a, ...b, ...c);
-    const cc = color((a[1] + b[1] + c[1]) / 3);
-    for (let k = 0; k < 3; k++) col.push(...cc);
+    const y = (a[1] + b[1] + c[1]) / 3;
+    // steepness from the face normal
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const steep = 1 - Math.abs(ny) / (Math.hypot(nx, ny, nz) || 1);
+    const hk = y / isl.h;
+    if (y < 0.8) tmp.copy(wetSand);
+    else if (y < 4 + rnd() * 3) tmp.copy(sand);
+    else if (steep > 0.62 || hk > 0.9) tmp.copy(rock);
+    else tmp.copy(rnd() < 0.3 ? scrub : grass).lerp(rock, Math.max(0, hk - 0.6) * 0.9);
+    tmp.multiplyScalar(0.9 + rnd() * 0.18);
+    for (let k = 0; k < 3; k++) col.push(tmp.r, tmp.g, tmp.b);
   };
-  for (let ri = 0; ri < rings; ri++) {
-    for (let j = 0; j < segs; j++) {
-      const j1 = (j + 1) % segs;
-      const a = grid[ri][j];
-      const b = grid[ri][j1];
-      const c = grid[ri + 1][j];
-      const d = grid[ri + 1][j1];
-      tri(a, c, b);
-      if (ri > 0) tri(b, c, d);
-      else tri(b, c, d);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const a = P[j][i];
+      const b = P[j][i + 1];
+      const c = P[j + 1][i];
+      const d = P[j + 1][i + 1];
+      // alternate the diagonal for a less gridded look
+      if ((i + j) % 2) {
+        tri(a, c, b);
+        tri(b, c, d);
+      } else {
+        tri(a, c, d);
+        tri(a, d, b);
+      }
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -232,15 +265,7 @@ function battleIsland(isl) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
   const g = new THREE.Group();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
-  g.add(mesh);
-  // surf line
-  const surf = new THREE.Mesh(
-    new THREE.RingGeometry(isl.r * 0.99, isl.r * 1.05, 48).rotateX(-Math.PI / 2),
-    keepAlpha(new THREE.MeshBasicMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.16, depthWrite: false })),
-  );
-  surf.position.y = 0.8;
-  g.add(surf);
+  g.add(new THREE.Mesh(geo, landMaterial()));
   g.position.set(isl.x, 0, isl.z);
   return g;
 }

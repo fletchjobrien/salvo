@@ -240,6 +240,38 @@ export class Audio {
     b.stop(t + 1.6);
   }
 
+  // Jet passing overhead: a roar that swells, then drops in pitch as it goes.
+  flyby(x, y, z, heavy = false) {
+    if (!this.ctx || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const { input, att } = this.spatial(x, y, z, heavy ? 0.9 : 1.2, 600, 0.5);
+    if (att < 0.02) return;
+    const dur = heavy ? 6 : 4;
+    const n = this.noise();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(heavy ? 500 : 1400, t);
+    bp.frequency.exponentialRampToValueAtTime(heavy ? 700 : 2600, t + dur * 0.45);
+    bp.frequency.exponentialRampToValueAtTime(heavy ? 250 : 500, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + dur * 0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    n.connect(bp).connect(g).connect(input);
+    n.start(t);
+    n.stop(t + dur + 0.1);
+    const b = this.noise(true);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(0.0001, t);
+    bg.gain.exponentialRampToValueAtTime(1.2, t + dur * 0.5);
+    bg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    b.connect(bg).connect(input);
+    b.start(t);
+    b.stop(t + dur + 0.1);
+  }
+
   splash(x, y, z, size) {
     if (!this.can('spl', 0.04)) return;
     const ctx = this.ctx;

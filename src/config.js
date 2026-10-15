@@ -27,6 +27,11 @@ export const CLASSES = {
   helo: { label: 'ASW Helicopter', short: 'HELO', len: 14, beam: 3, maxSpeed: 45, accel: 10, turnRate: 0.9, hp: 12, chaff: 0, vls: [0], noise: 0, air: true, alt: 60 },
   drone: { label: 'Recon Drone', short: 'UAV', len: 9, beam: 12, maxSpeed: 70, accel: 12, turnRate: 0.45, hp: 8, chaff: 0, vls: [0], noise: 0, air: true, alt: 180 },
   strike: { label: 'Strike Drone', short: 'UCAV', len: 12, beam: 15, maxSpeed: 85, accel: 14, turnRate: 0.4, hp: 10, chaff: 0, vls: [0], noise: 0, air: true, alt: 140 },
+  // off-map air support
+  fighter: { label: 'Fighter', short: 'FTR', len: 16, beam: 11, maxSpeed: 150, accel: 40, turnRate: 1.0, hp: 14, chaff: 0, vls: [0], noise: 0, air: true, alt: 420 },
+  jet: { label: 'Strike Jet', short: 'ATK', len: 18, beam: 13, maxSpeed: 130, accel: 35, turnRate: 0.8, hp: 16, chaff: 0, vls: [0], noise: 0, air: true, alt: 300 },
+  mpa: { label: 'Patrol Aircraft', short: 'MPA', len: 38, beam: 36, maxSpeed: 80, accel: 15, turnRate: 0.35, hp: 30, chaff: 0, vls: [0], noise: 0, air: true, alt: 500 },
+  aew: { label: 'AEW Aircraft', short: 'AEW', len: 32, beam: 30, maxSpeed: 75, accel: 15, turnRate: 0.35, hp: 26, chaff: 0, vls: [0], noise: 0, air: true, alt: 650 },
   // civilians on the shipping lane
   cargo: { label: 'Container Ship', short: 'CIV', len: 110, beam: 16, maxSpeed: 9, accel: 0.4, turnRate: 0.05, hp: 60, chaff: 0, vls: [0], civ: true, noise: 1.3 },
   tanker: { label: 'Tanker', short: 'CIV', len: 128, beam: 19, maxSpeed: 8, accel: 0.35, turnRate: 0.045, hp: 75, chaff: 0, vls: [0], civ: true, noise: 1.4 },
@@ -93,6 +98,16 @@ export const SENSORS = {
 };
 
 export const CONTROL = { radius: 650, capture: 12, win: 300 };
+
+// Off-map air support: called in, flies in from your edge of the map, does
+// its job, then flies home. `orbit` is the patrol radius over the target.
+export const AIR_SUPPORT = {
+  cap: { name: 'Fighter CAP', short: 'FIGHTERS', cls: 'fighter', count: 2, duration: 90, cooldown: 110, orbit: 1100, desc: 'Two fighters patrol the point and shoot down enemy aircraft.' },
+  strike: { name: 'Strike Package', short: 'STRIKE', cls: 'jet', count: 2, duration: 70, cooldown: 150, orbit: 0, desc: 'Two jets fly at a contact, launch 4 anti-ship missiles, then leave.' },
+  mpa: { name: 'Maritime Patrol', short: 'PATROL', cls: 'mpa', count: 1, duration: 100, cooldown: 140, orbit: 900, desc: 'Long-range radar and sonobuoys; torpedoes any submarine it finds.' },
+  aew: { name: 'AEW Radar', short: 'AEW', cls: 'aew', count: 1, duration: 100, cooldown: 160, orbit: 1500, desc: 'Flying radar: 11 km sweep for your whole fleet.' },
+};
+export const AAM = { speed: 520, range: 4200, pk: 0.75, turn: 5 };
 
 // Starting formation offsets (lateral x, forward z) relative to the flagship.
 export const FORMATION = [

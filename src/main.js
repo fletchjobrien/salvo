@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES } from './config.js';
+import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES, AIR_SUPPORT } from './config.js';
 import { World, radarRange, jammedAt, isCombatant, isAir, weaponRange } from './sim/world.js';
 import { AIController } from './sim/ai.js';
 import { Renderer } from './render/renderer.js';
@@ -364,7 +364,7 @@ class Game {
     if (!add) this.selected.clear();
     for (const id of ids) {
       const s = this.shipById(id);
-      if (s && s.alive && s.side === this.side) {
+      if (s && s.alive && s.side === this.side && !s.offmap) {
         if (add && this.selected.has(id) && ids.length === 1) this.selected.delete(id);
         else this.selected.add(id);
       }
@@ -404,6 +404,7 @@ class Game {
 
   toggleFireMode() {
     this.jamMode = false;
+    this.airMode = null;
     const ids = this.liveSelected().filter((id) => this.shipById(id).ssm + (this.shipById(id).torps || 0) > 0);
     if (!ids.length) {
       this.audio.deny();
@@ -456,8 +457,50 @@ class Game {
       .filter((s) => s.spec.canJam);
   }
 
+  // Off-map air support: pick a mission, then click where (or whom) to send it.
+  airCooldown(key) {
+    const cd = this.state && this.state.airCd && this.state.airCd[this.side];
+    return cd ? cd[key] || 0 : 99;
+  }
+
+  toggleAirMode(key) {
+    const A = AIR_SUPPORT[key];
+    this.fireMode = false;
+    this.jamMode = false;
+    const wait = Math.ceil(this.airCooldown(key));
+    if (wait > 0) {
+      this.airMode = null;
+      this.hud.message(`${A.name.toUpperCase()}: available in ${wait}s`, 'warn');
+      return this.audio.deny();
+    }
+    this.airMode = this.airMode === key ? null : key;
+    this.audio.blip(this.airMode ? 700 : 300, 0.08, 'triangle', 0.08);
+    if (this.airMode) this.hud.message(key === 'strike' ? 'STRIKE: click an identified enemy ship.' : `${A.name.toUpperCase()}: click where to send it.`, 'friend');
+  }
+
+  callAirAt(sx, sy) {
+    const key = this.airMode;
+    this.airMode = null;
+    if (key === 'strike') {
+      const t = this.pickShip(sx, sy, (s) => s.side !== this.side && isCombatant(s) && !s.submerged && !isAir(s));
+      const c = t && this.contactPos(t);
+      if (!c || c.level < 1) {
+        this.hud.message('Strike needs an identified enemy ship.', 'warn');
+        return this.audio.deny();
+      }
+      this.issue({ type: 'air', mission: key, x: c.x, z: c.z, target: t.id });
+    } else {
+      const g = this.ground(sx, sy);
+      if (!g) return;
+      this.issue({ type: 'air', mission: key, x: g.x, z: g.z });
+      this.overlay.ping(g.x, g.z);
+    }
+    this.audio.order();
+  }
+
   toggleJamMode() {
     this.fireMode = false;
+    this.airMode = null;
     const ready = this.jammers().filter((s) => !(s.jamCd > 0));
     if (!ready.length) {
       this.hud.message(this.jammers().length ? 'Jammers recharging.' : 'No jammer fitted on the selected ships.', 'warn');
@@ -663,6 +706,10 @@ class Game {
       if (!this.inBattle()) return;
       this.mouse = { x: e.clientX, y: e.clientY };
       if (e.button === 0) {
+        if (this.airMode) {
+          this.callAirAt(e.clientX, e.clientY);
+          return;
+        }
         if (this.jamMode) {
           this.castJam(e.clientX, e.clientY);
           return;
@@ -699,7 +746,7 @@ class Game {
       }
       const h = this.pickShip(e.clientX, e.clientY);
       this.hoverId = h ? h.id : null;
-      gl.style.cursor = this.fireMode || this.jamMode ? 'none' : h ? 'pointer' : 'default';
+      gl.style.cursor = this.fireMode || this.jamMode || this.airMode ? 'none' : h ? 'pointer' : 'default';
     });
 
     window.addEventListener('mouseup', (e) => {
@@ -774,6 +821,10 @@ class Game {
   }
 
   rightClick(sx, sy, shift) {
+    if (this.airMode) {
+      this.airMode = null;
+      return;
+    }
     const ids = this.liveSelected();
     if (!ids.length) return;
     if (this.fireMode || this.jamMode) {
@@ -804,7 +855,7 @@ class Game {
     }
     if (!this.inBattle()) return;
     this.keys.add(e.code);
-    const mine = this.state.ships.filter((s) => s.side === this.side);
+    const mine = this.state.ships.filter((s) => s.side === this.side && !s.offmap);
     const k = e.code;
     const tap = (key) => {
       const now = performance.now();
@@ -828,6 +879,10 @@ class Game {
     else if (k === 'KeyJ') this.toggleJamMode();
     else if (k === 'KeyU') this.toggleDive();
     else if (k === 'KeyP') this.sonarPing();
+    else if (k === 'KeyI') this.toggleAirMode('cap');
+    else if (k === 'KeyO') this.toggleAirMode('strike');
+    else if (k === 'KeyK') this.toggleAirMode('mpa');
+    else if (k === 'KeyL') this.toggleAirMode('aew');
     else if (k === 'KeyZ') this.setSalvo(2);
     else if (k === 'KeyX') this.setSalvo(4);
     else if (k === 'KeyC') this.setSalvo(6);
@@ -837,8 +892,10 @@ class Game {
       e.preventDefault();
       this.setSpeed(0);
     } else if (k === 'Escape') {
-      if (this.fireMode || this.jamMode) this.fireMode = this.jamMode = false;
-      else this.selected.clear();
+      if (this.fireMode || this.jamMode || this.airMode) {
+        this.fireMode = this.jamMode = false;
+        this.airMode = null;
+      } else this.selected.clear();
     } else if (k === 'Space') {
       e.preventDefault();
       if (this.mode === 'sp') this.paused = !this.paused;
@@ -897,6 +954,10 @@ class Game {
             this.hud.message(`${s.name.toUpperCase()}: bird away`, 'friend');
           }
           if (e.k === 'torp' && mine) this.hud.message(`${s.name.toUpperCase()}: torpedo in the water`, 'friend');
+          if (e.k === 'aam' && mine) {
+            this.hud.message(`${s.name}: Fox Three`, 'friend');
+            if (this.audio.can('fox', 6)) this.audio.say('Fox three.');
+          }
           if (shipVisible || mine) this.audio.launch(e.x, e.y, e.z, e.k);
           break;
         case 'gun':
@@ -1040,6 +1101,16 @@ class Game {
         case 'system':
           if (mine) this.hud.message(`${s.name.toUpperCase()}: ${{ radar: 'radar damaged', engine: 'engine room damaged', gun: 'main gun out of action' }[e.sys]}`, 'warn');
           break;
+        case 'air':
+          if (e.side === me) {
+            const A = AIR_SUPPORT[e.mission];
+            this.hud.message(`${A.name.toUpperCase()} inbound — ${A.desc}`, 'friend');
+            this.audio.say({ cap: 'Fighters on the way.', strike: 'Strike package inbound.', mpa: 'Patrol aircraft on the way.', aew: 'Early warning aircraft on the way.' }[e.mission]);
+          }
+          break;
+        case 'rtb':
+          if (e.side === me) this.hud.message(`${AIR_SUPPORT[e.mission].name.toUpperCase()}: returning to base`, 'friend');
+          break;
         case 'end':
           this.endT = 4.5;
           if (this.mode === 'host' && this.net) this.net.send({ t: 'stats', stats: this.world.stats });
@@ -1054,6 +1125,26 @@ class Game {
   nearFlash(x, y, z, k) {
     const d = this.r.camera.position.distanceTo(new THREE.Vector3(x, y, z));
     this.flash = Math.max(this.flash, (k * 0.5) / (1 + Math.pow(d / 400, 2)));
+  }
+
+  // Enemy air support showing up on our plot, and jets roaring past the camera.
+  checkAircraft() {
+    this.seenAir = this.seenAir || new Set();
+    const cam = this.r.camera.position;
+    for (const s of this.state.ships) {
+      if (!s.offmap || !s.alive) continue;
+      if (s.side !== this.side && this.visible.has(s.id) && !this.seenAir.has(s.id)) {
+        this.seenAir.add(s.id);
+        if (this.audio.can('enemyair', 8)) {
+          this.hud.message(`ENEMY ${CLASSES[s.cls].label.toUpperCase()} INBOUND`, 'enemy');
+          this.audio.say(s.cls === 'jet' ? 'Enemy strike aircraft inbound!' : s.cls === 'fighter' ? 'Bandits inbound!' : 'Enemy aircraft on radar.', true);
+        }
+      }
+      const seen = s.side === this.side || this.visible.has(s.id);
+      if (seen && Math.hypot(s.x - cam.x, s.alt - cam.y, s.z - cam.z) < 700 && this.audio.can('flyby' + s.id, 15)) {
+        this.audio.flyby(s.x, s.alt, s.z, s.cls === 'mpa' || s.cls === 'aew');
+      }
+    }
   }
 
   checkVampires() {
@@ -1185,7 +1276,10 @@ class Game {
     this.audio.muteVoice = this.mode === 'menu';
 
     this.processEvents(events);
-    if (this.inBattle()) this.checkVampires();
+    if (this.inBattle()) {
+      this.checkVampires();
+      this.checkAircraft();
+    }
 
     const t = state.time;
     this.view.camPos = this.r.camera.position;

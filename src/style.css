@@ -293,3 +293,20 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 .stats .line b { color: #fff; font-weight: normal; text-align: right; }
 .pips i.air { background: #e0e6ea; } .slot.air { border-color: #e0e6ea; background: rgba(70, 80, 90, 0.8); }
 .ch.air { color: #e0e6ea; } .part.air { border-left-color: #e0e6ea; }
+
+/* ---------- off-map air support */
+#airpanel {
+  position: absolute; right: 10px; top: calc(min(240px, calc(30vw + 20px)) + 40px);
+  width: 150px; display: flex; flex-direction: column; gap: 4px;
+}
+#airpanel .lbl { color: #7fa9ba; font-size: 15px; letter-spacing: 0.08em; text-align: right; }
+#airpanel button {
+  position: relative; display: flex; justify-content: space-between; gap: 6px;
+  font-size: 16px; padding: 3px 7px; color: #8a96a0; overflow: hidden;
+}
+#airpanel button i { position: absolute; left: 0; bottom: 0; height: 2px; background: rgba(255,226,138,0.5); }
+#airpanel button.ready { color: #ffe28a; border-color: rgba(255,226,138,0.55); }
+#airpanel button.ready i { background: #ffe28a; }
+#airpanel button.on { background: rgba(120, 95, 30, 0.9); color: #fff; }
+#airpanel .cd { color: inherit; opacity: 0.85; }
+@media (max-width: 900px) { #airpanel { display: none; } }

@@ -1,14 +1,16 @@
 // Crisp 2D tactical overlay drawn above the pixelated 3D view: NTDS-style
 // contact symbols, missile tracks, orders, selection and the minimap.
 import * as THREE from 'three';
-import { CLASSES } from '../config.js';
+import { CLASSES, AIR_SUPPORT } from '../config.js';
 import { radarRange } from '../sim/world.js';
+import { islandRadius } from '../sim/map.js';
 
 const FRIEND = '#62d8ff';
 const HOSTILE = '#ff4d3d';
 const UNKNOWN = '#ffd166';
 const CIVIL = '#9be89b';
 const JAM = '#b98cff';
+const AIRC = '#ffe28a';
 const FONT = '"VT323", monospace';
 
 const _v = new THREE.Vector3();
@@ -227,7 +229,7 @@ export class Overlay {
       }
       if (sel) this.brackets(p.x, p.y, 14, col);
       const targeted = [...g.selected].some((id) => g.shipById(id)?.target === s.id);
-      if (!friendly && (targeted || (g.fireMode && hover))) {
+      if (!friendly && (targeted || ((g.fireMode || g.airMode === 'strike') && hover))) {
         const t = performance.now() * 0.004;
         ctx.save();
         ctx.translate(p.x, p.y);
@@ -299,6 +301,24 @@ export class Overlay {
       ctx.font = `16px ${FONT}`;
       ctx.fillStyle = HOSTILE;
       ctx.fillText(`SALVO x${g.salvo} — PICK TARGET`, x + 18, y + 30);
+    }
+
+    if (g.airMode && g.mouse) {
+      const A = AIR_SUPPORT[g.airMode];
+      const { x, y } = g.mouse;
+      const gp = g.ground(x, y);
+      if (gp && A.orbit) this.groundCircle(gp.x, gp.z, A.orbit, 'rgba(232,238,242,0.55)', [5, 5]);
+      ctx.strokeStyle = AIRC;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y);
+      ctx.lineTo(x + 9, y);
+      ctx.moveTo(x, y - 9);
+      ctx.lineTo(x, y + 9);
+      ctx.stroke();
+      ctx.font = `16px ${FONT}`;
+      ctx.fillStyle = AIRC;
+      ctx.fillText(`${A.short} — ${g.airMode === 'strike' ? 'PICK TARGET' : 'CLICK TO SEND'}`, x + 16, y + 26);
     }
 
     if (g.jamMode && g.mouse) {
@@ -486,7 +506,7 @@ export class Overlay {
         ctx.stroke();
       }
       ctx.globalAlpha = fade;
-      ctx.strokeStyle = g.fireMode && hover ? HOSTILE : UNKNOWN;
+      ctx.strokeStyle = (g.fireMode || g.airMode === 'strike') && hover ? HOSTILE : UNKNOWN;
       ctx.lineWidth = hover ? 1.6 : 1.2;
       ctx.beginPath();
       ctx.moveTo(p.x, p.y - 4.5);
@@ -526,7 +546,7 @@ export class Overlay {
       ctx.fillText(s.name.toUpperCase(), p.x, p.y - 12);
       ctx.textAlign = 'left';
     }
-    if (g.fireMode && hover) this.brackets(p.x, p.y, 14, HOSTILE);
+    if ((g.fireMode || g.airMode === 'strike') && hover) this.brackets(p.x, p.y, 14, HOSTILE);
   }
 
   // Screen position of a ship's symbol. When zoomed in, float it above the
@@ -743,11 +763,16 @@ export class Overlay {
     // map: islands, lane, control point
     const map = g.state.map;
     if (map) {
-      ctx.fillStyle = 'rgba(120,140,100,0.55)';
+      ctx.fillStyle = '#4d5a43';
       for (const i of map.islands) {
-        const [ix, iy] = P(i.x, i.z);
         ctx.beginPath();
-        ctx.arc(ix, iy, Math.max(1.5, i.r * v.scale), 0, Math.PI * 2);
+        for (let k = 0; k < 40; k++) {
+          const t = (k / 40) * Math.PI * 2;
+          const rr = islandRadius(i, Math.cos(t), Math.sin(t));
+          const [ix, iy] = P(i.x + Math.cos(t) * rr, i.z + Math.sin(t) * rr);
+          if (k) ctx.lineTo(ix, iy);
+          else ctx.moveTo(ix, iy);
+        }
         ctx.fill();
       }
       const L = map.lane;

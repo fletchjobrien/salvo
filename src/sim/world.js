@@ -14,9 +14,11 @@ import {
   START_DISTANCE,
   SENSORS,
   CONTROL,
+  AIR_SUPPORT,
+  AAM,
 } from '../config.js';
 import { buildSpec, presetFleet, validateFleet } from '../fleet.js';
-import { generateMap, islandHeight, lineBlocked } from './map.js';
+import { generateMap, islandHeight, islandRadius, lineBlocked } from './map.js';
 
 const TAU = Math.PI * 2;
 export const wrapAngle = (a) => {
@@ -86,6 +88,9 @@ export class World {
     this.contacts = { blue: new Map(), red: new Map() };
     this.visible = { blue: new Set(), red: new Set() };
     this.civT = rand(20, 35);
+    // air support becomes available a little way into the battle
+    const cds = () => Object.fromEntries(Object.keys(AIR_SUPPORT).map((k) => [k, 40 + Math.random() * 20]));
+    this.airCd = { blue: cds(), red: cds() };
     this.civDir = 1;
     this.stats = {
       blue: { ssmFired: 0, ssmHits: 0, intercepts: 0, shellHits: 0, sunk: 0, civHits: 0 },
@@ -213,9 +218,10 @@ export class World {
   // ---------------------------------------------------------------- commands
   command(side, cmd) {
     if (this.winner) return;
+    if (cmd.type === 'air') return this.callAir(side, cmd.mission, cmd.x, cmd.z, cmd.target);
     const ships = (cmd.ships || [])
       .map((id) => this.byId.get(id))
-      .filter((s) => s && s.side === side && s.alive);
+      .filter((s) => s && s.side === side && s.alive && !s.offmap);
     if (!ships.length) return;
 
     switch (cmd.type) {
@@ -316,6 +322,25 @@ export class World {
     }
   }
 
+  // Off-map aircraft fly in from our edge of the map.
+  callAir(side, mission, x, z, target) {
+    const A = AIR_SUPPORT[mission];
+    if (!A || !this.airCd[side] || this.airCd[side][mission] > 0) return false;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    this.airCd[side][mission] = A.cooldown;
+    const edgeZ = (side === 'blue' ? -1 : 1) * (WORLD.radius + 900);
+    const ex = clamp(x, -WORLD.radius, WORLD.radius) * 0.5;
+    for (let i = 0; i < A.count; i++) {
+      const name = `${A.short} ${i + 1}`;
+      const a = this.spawnShip(side, { cls: A.cls, modules: [], name, hull: A.name }, ex + (i - (A.count - 1) / 2) * 120, edgeZ - i * 80, Math.atan2(x - ex, z - edgeZ));
+      a.offmap = true;
+      a.speed = a.spec.maxSpeed;
+      a.mission = { type: mission, x, z, target: target || 0, t: A.duration, orbit: A.orbit, phase: 'in', edgeX: ex, edgeZ, slot: i };
+    }
+    this.emit({ t: 'air', side, mission, x, z });
+    return true;
+  }
+
   // Best weapon with ammo left that reaches `dist`: torpedoes for submerged
   // subs, missiles (then heavy torpedoes) for everything on the surface.
   pickWeapon(s, dist, t) {
@@ -353,7 +378,7 @@ export class World {
       const dx = x - i.x;
       const dz = z - i.z;
       const d = Math.hypot(dx, dz) || 1;
-      const need = i.r + margin + 60;
+      const need = islandRadius(i, dx, dz) + margin + 60;
       if (d < need) {
         x = i.x + (dx / d) * need;
         z = i.z + (dz / d) * need;
@@ -406,6 +431,7 @@ export class World {
     }
     this.jams = this.jams.filter((j) => j.t > 0);
 
+    for (const side of ['blue', 'red']) for (const k in this.airCd[side]) this.airCd[side][k] = Math.max(0, this.airCd[side][k] - dt);
     this.stepSensors(dt);
     for (const s of this.ships) this.stepShip(s, dt);
     this.separateShips(dt);
@@ -495,7 +521,7 @@ export class World {
         for (const f of own) {
           const d = Math.hypot(e.x - f.x, e.z - f.z);
           // lookouts
-          if (d < SENSORS.visual && !lineBlocked(this.map, f.x, f.z, e.x, e.z)) {
+          if (d < SENSORS.visual && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) {
             this.upsert(side, e, 1);
             seen = true;
             break;
@@ -526,7 +552,7 @@ export class World {
           for (const e of this.ships) {
             if (e.side === side || !e.alive || e.submerged) continue;
             const d = Math.hypot(e.x - f.x, e.z - f.z);
-            if (d < range && !lineBlocked(this.map, f.x, f.z, e.x, e.z)) this.upsert(side, e, d < range * r.ident ? 1 : 0);
+            if (d < range && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) this.upsert(side, e, d < range * r.ident ? 1 : 0);
           }
         });
       }
@@ -547,7 +573,7 @@ export class World {
     this.sonarTick[side] -= dt;
     if (this.sonarTick[side] > 0) return;
     this.sonarTick[side] = 1;
-    const listeners = own.filter((f) => f.spec.sonar && f.spec.sonar.passive > 0 && !isAir(f));
+    const listeners = own.filter((f) => f.spec.sonar && f.spec.sonar.passive > 0 && (!isAir(f) || f.cls === 'mpa'));
     if (!listeners.length) return;
     for (const e of this.ships) {
       if (e.side === side || !e.alive || isAir(e)) continue;
@@ -558,7 +584,7 @@ export class World {
         const self = f.speed > f.spec.maxSpeed * 0.65 ? 0.6 : 1; // own flow noise deafens you
         const range = f.spec.sonar.passive * noise * self;
         const d = Math.hypot(e.x - f.x, e.z - f.z);
-        if (d < range && !lineBlocked(this.map, f.x, f.z, e.x, e.z)) {
+        if (d < range && (isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) {
           best = Math.min(best, d);
           if (d < range * f.spec.sonar.ident) ident = true;
         }
@@ -653,7 +679,7 @@ export class World {
       const dx = s.x - i.x;
       const dz = s.z - i.z;
       const d = Math.hypot(dx, dz) || 1;
-      const min = i.r + c.beam;
+      const min = islandRadius(i, dx, dz) + c.beam;
       if (d < min) {
         s.x = i.x + (dx / d) * min;
         s.z = i.z + (dz / d) * min;
@@ -708,7 +734,10 @@ export class World {
     let tx;
     let tz;
     let R;
-    if (s.waypoints.length) {
+    if (s.mission) {
+      ({ tx, tz, R } = this.missionTarget(s, dt));
+      if (s.gone) return;
+    } else if (s.waypoints.length) {
       tx = s.waypoints[0].x;
       tz = s.waypoints[0].z;
       R = 0;
@@ -737,10 +766,11 @@ export class World {
     let desired = Math.atan2(dx, dz);
     let targetSpeed = c.maxSpeed * 0.85;
     if (R && d < R * 1.5) {
-      if (s.cls === 'helo') targetSpeed = Math.max(4, d * 0.1); // hover
+      if (s.cls === 'helo' && !s.mission) targetSpeed = Math.max(4, d * 0.1); // hover
       else desired = Math.atan2(s.x - tx, s.z - tz) + Math.PI / 2 + clamp((d - R) / R, -1, 1);
     }
-    if (Math.hypot(s.x, s.z) > WORLD.radius) desired = Math.atan2(-s.x, -s.z);
+    if (Math.hypot(s.x, s.z) > WORLD.radius && !s.mission) desired = Math.atan2(-s.x, -s.z);
+    if (s.mission) targetSpeed = c.maxSpeed * (s.mission.phase === 'on' ? 0.75 : 1);
     s.speed += clamp(targetSpeed - s.speed, -c.accel * dt, c.accel * dt);
     const turn = clamp(wrapAngle(desired - s.heading), -c.turnRate * dt, c.turnRate * dt);
     s.heading = wrapAngle(s.heading + turn);
@@ -751,9 +781,10 @@ export class World {
 
     s.launchCd -= dt;
     s.sonarCd -= dt;
-    if (s.cls === 'helo') {
-      if (s.speed < 12) this.activePing(s);
-      // drop a torpedo on any identified submarine close by
+    if (s.cls === 'helo' && s.speed < 12) this.activePing(s);
+    if (s.ammo.aam > 0) this.fighterAttack(s);
+    // helicopters and patrol planes torpedo any identified submarine close by
+    if (s.cls === 'helo' || s.cls === 'mpa') {
       if (s.ammo.light > 0 && s.launchCd <= 0 && !s.launchQueue.length) {
         for (const k of this.contacts[s.side].values()) {
           const e = this.byId.get(k.id);
@@ -768,6 +799,58 @@ export class World {
     this.stepLaunches(s, c);
   }
 
+  // Where an off-map aircraft is heading: in to the target, patrol, home.
+  missionTarget(s, dt) {
+    const M = s.mission;
+    // the clock runs once on station; the flight in is free
+    if (M.phase === 'in') M.inT = (M.inT || 0) + dt;
+    else M.t -= dt;
+    if (M.inT > 150) M.t = 0;
+    const home = () => {
+      if (M.phase === 'out') return;
+      M.phase = 'out';
+      if (M.slot === 0) this.emit({ t: 'rtb', s: s.id, side: s.side, mission: M.type });
+    };
+    if (M.t <= 0) home();
+    if (M.type === 'strike' && M.phase !== 'out') {
+      const c = this.contacts[s.side].get(M.target);
+      const t = this.byId.get(M.target);
+      if (c && t && t.alive) {
+        M.x = c.x;
+        M.z = c.z;
+        const d = Math.hypot(c.x - s.x, c.z - s.z);
+        if (d < 3300 && s.ssm > 0 && !s.launchQueue.length) {
+          for (let i = 0; i < s.ammo.skimmer; i++) s.launchQueue.push({ tid: t.id, type: 'skimmer' });
+        }
+      }
+      if (s.ssm === 0 && !s.launchQueue.length) home();
+    }
+    if (M.phase === 'out') {
+      // home: back past our edge of the map, then gone
+      if (Math.abs(s.z) > WORLD.radius + 700 && Math.sign(s.z) === Math.sign(M.edgeZ)) s.gone = true;
+      return { tx: M.edgeX, tz: M.edgeZ * 1.2, R: 0 };
+    }
+    const d = Math.hypot(M.x - s.x, M.z - s.z);
+    if (M.phase === 'in' && d < (M.orbit || 400) * 1.3) M.phase = 'on';
+    // spread pairs around the orbit
+    const a = this.time * 0.1 + M.slot * Math.PI;
+    if (M.type === 'strike') return { tx: M.x, tz: M.z, R: 0 };
+    return { tx: M.x + Math.sin(a) * 50, tz: M.z + Math.cos(a) * 50, R: M.orbit };
+  }
+
+  // Fighters: air-to-air missiles at enemy aircraft on the plot.
+  fighterAttack(s) {
+    if (s.launchCd > 0) return;
+    const t = this.nearestAircraft(s, AAM.range);
+    if (!t || (t.samAssigned || 0) >= 1) return;
+    s.ammo.aam--;
+    s.launchCd = 2.5;
+    t.samAssigned = (t.samAssigned || 0) + 1;
+    const m = { id: this.nextId++, kind: 'sam', aam: true, side: s.side, launcher: s.id, x: s.x, y: s.alt - 3, z: s.z, heading: s.heading, pitch: 0, speed: s.speed + 50, targetId: t.id, air: true, age: 0.4, alive: true };
+    this.missiles.push(m);
+    this.emit({ t: 'launch', k: 'aam', s: s.id, m: m.id, x: m.x, y: m.y, z: m.z, side: s.side });
+  }
+
   // Steer around islands that lie ahead.
   avoidLand(s, desired) {
     const c = s.spec;
@@ -779,9 +862,12 @@ export class World {
       const dx = i.x - s.x;
       const dz = i.z - s.z;
       const along = dx * sh + dz * ch;
-      if (along < -i.r * 0.3 || along > look + i.r) continue;
+      if (along < -i.rmax * 0.3 || along > look + i.rmax) continue;
       const lateral = dx * ch - dz * sh; // + means island is to starboard
-      const clear = i.r + c.beam + 90;
+      // coast radius on the side we would pass
+      const cx = s.x + sh * along - i.x;
+      const cz = s.z + ch * along - i.z;
+      const clear = (Math.hypot(cx, cz) > 1 ? islandRadius(i, cx, cz) : i.rmax) + c.beam + 90;
       if (Math.abs(lateral) > clear) continue;
       if (!best || along < best.along) best = { along, lateral, clear };
     }
@@ -1414,7 +1500,7 @@ export class World {
 
   // A SAM chasing an aircraft.
   stepSAMvsAir(m, dt) {
-    const W = WEAPONS.sam;
+    const W = m.aam ? { ...WEAPONS.sam, speed: AAM.speed, turn: AAM.turn, life: 9 } : WEAPONS.sam;
     const t = this.byId.get(m.targetId);
     if (!t || !t.alive || m.age > W.life) {
       m.alive = false;
@@ -1440,7 +1526,7 @@ export class World {
     if (Math.hypot(t.x - m.x, t.z - m.z, t.alt - m.y) < 18) {
       m.alive = false;
       t.samAssigned = Math.max(0, (t.samAssigned || 1) - 1);
-      if (Math.random() < 0.75) this.damage(t, 99, null, 0, m.side);
+      if (Math.random() < (m.aam ? AAM.pk : 0.75)) this.damage(t, 99, null, 0, m.side);
       else this.emit({ t: 'airburst', x: m.x, y: m.y, z: m.z, small: true, m: m.id });
     }
   }
@@ -1518,7 +1604,7 @@ export class World {
         s.chaff,
         r3(s.gunAim),
         s.fires.map((f) => [r1(f.lx), r1(f.lz)]),
-        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0) | (s.radar ? 0 : 8) | (s.submerged ? 16 : 0),
+        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0) | (s.radar ? 0 : 8) | (s.submerged ? 16 : 0) | (s.offmap ? 32 : 0),
         s.target || 0,
         s.throttle,
         s.waypoints.map((w) => [r1(w.x), r1(w.z)]),
@@ -1529,13 +1615,14 @@ export class World {
         s.cls,
         [s.ammo.skimmer, s.ammo.supersonic, s.ammo.cruise, s.ammo.heavy, s.ammo.light],
         r1(s.jamCd),
-        s.civ ? s.name : 0,
+        s.civ || s.offmap ? s.name : 0,
         r1(s.alt),
         Math.max(0, r1(s.sonarCd)),
       ]),
       missiles: this.missiles.map((m) => [m.id, m.kind === 'ssm' ? 0 : m.kind === 'sam' ? 1 : 2, m.side === 'blue' ? 0 : 1, r1(m.x), r1(m.y), r1(m.z), r3(m.heading), r3(m.pitch), r1(m.speed), m.targetId || 0, m.type || 0]),
       contacts: { blue: contacts('blue'), red: contacts('red') },
       jams: this.jams.map((j) => [j.id, j.ship, SIDE_CODE[j.side], r1(j.x), r1(j.z), r3(j.dir), r3(j.half), j.range, r1(j.t), j.max]),
+      air: { blue: Object.values(this.airCd.blue).map(Math.ceil), red: Object.values(this.airCd.red).map(Math.ceil) },
       cp: [r3(this.cp.progress), this.cp.owner ? SIDE_CODE[this.cp.owner] : -1, r1(this.cp.score.blue), r1(this.cp.score.red), this.cp.contested ? 1 : 0],
       winner: this.winner,
     };

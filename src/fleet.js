@@ -214,6 +214,10 @@ const AIR_FIT = {
   helo: { radars: [{ name: 'Helo Radar', range: 2600, period: 2, ident: 0.7 }], ammo: { light: 2 }, sonar: SONAR_TYPES.dipping },
   drone: { radars: [{ name: 'Drone Radar', range: 4800, period: 2, ident: 0.45 }], ammo: {}, sonar: null },
   strike: { radars: [{ name: 'Strike Radar', range: 2500, period: 2.5, ident: 0.5 }], ammo: { skimmer: 2 }, sonar: null },
+  fighter: { radars: [{ name: 'Fighter Radar', range: 4200, period: 1.5, ident: 0.6 }], ammo: { aam: 4 }, sonar: null },
+  jet: { radars: [{ name: 'Attack Radar', range: 3600, period: 2, ident: 0.5 }], ammo: { skimmer: 2 }, sonar: null },
+  mpa: { radars: [{ name: 'Patrol Radar', range: 6500, period: 3, ident: 0.35 }], ammo: { light: 4 }, sonar: { name: 'Sonobuoys', passive: 2600, active: 0, ident: 0.5, cooldown: 99 } },
+  aew: { radars: [{ name: 'AEW Radar', range: 11000, period: 4, ident: 0.25 }], ammo: {}, sonar: null },
 };
 
 // Stats for one ship design: the hull's values plus its modules.
@@ -229,6 +233,7 @@ export function buildSpec(cls, modules = []) {
     cruise: 2 * n('cruise'),
     heavy: 4 * n('torpedo'),
     light: 4 * n('asw') + (air?.ammo.light || 0),
+    aam: air?.ammo.aam || 0,
   };
   return {
     ...base,

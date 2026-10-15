@@ -392,6 +392,93 @@ function buildDrone(pal, strike) {
   return { geo: b.build(), deck: 0.6, gunZ: 0, gunSize: 0.1, radarY: -0.8, radarZ: 1.5, stacks: [[0, 0, -3]], ciws: [[0, 0, 0]], mastTop: [0, 0.8, 0] };
 }
 
+// Fast jets: delta / swept wings built from flat wedges.
+function wing(b, span, root, tip, sweep, x0, y, z, color, side) {
+  const g = new THREE.BufferGeometry();
+  const s = side;
+  // root leading, root trailing, tip trailing, tip leading (z forward)
+  const v = [
+    [x0 * s, y, z + root / 2],
+    [x0 * s, y, z - root / 2],
+    [(x0 + span) * s, y, z - root / 2 - sweep + (root - tip) * 0.15],
+    [(x0 + span) * s, y, z - sweep + tip / 2 + (root - tip) * 0.15],
+  ];
+  const T = 0.25;
+  const pos = [];
+  const quad = (a, c, d, e) => pos.push(...a, ...c, ...d, ...a, ...d, ...e);
+  const up = v.map((p) => [p[0], p[1] + T, p[2]]);
+  const dn = v.map((p) => [p[0], p[1] - T, p[2]]);
+  if (s > 0) {
+    quad(up[0], up[3], up[2], up[1]);
+    quad(dn[0], dn[1], dn[2], dn[3]);
+  } else {
+    quad(up[0], up[1], up[2], up[3]);
+    quad(dn[0], dn[3], dn[2], dn[1]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    if (s > 0) quad(up[i], dn[i], dn[j], up[j]);
+    else quad(up[i], up[j], dn[j], dn[i]);
+  }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  b.add(colorize(g, color));
+}
+
+function buildFighter(pal) {
+  const b = new Builder();
+  b.taper(1.6, 1.5, 15, 0, 0, -0.5, pal.sup2, 0.7, 0.92);
+  b.cyl(0.05, 0.8, 3, 0, 0, 8.3, pal.sup2, 6, Math.PI / 2);
+  b.box(1, 0.6, 2.6, 0, 0.9, 3.6, pal.window);
+  for (const s of [-1, 1]) {
+    wing(b, 5, 7, 1.4, 4.2, 0.6, 0, -1.5, pal.sup2, s);
+    wing(b, 2.2, 2.4, 0.9, 1.2, 0.5, 0, -6.6, pal.sup2, s);
+    b.box(0.2, 2.4, 2, s * 0.9, 1.4, -5.8, pal.sup2, 0, 0, s * 0.35);
+    b.cyl(0.18, 0.18, 2.6, s * 5.4, -0.3, -1.6, pal.white, 5, Math.PI / 2);
+  }
+  return { geo: b.build(), deck: 0.6, gunZ: 0, gunSize: 0.1, radarY: -0.8, radarZ: 1.5, stacks: [[0, 0, -6]], ciws: [[0, 0, 0]], mastTop: [0, 1, 0], jet: [[0, 0, -8.3, 0.7]] };
+}
+
+function buildJet(pal) {
+  const b = new Builder();
+  b.taper(1.8, 1.6, 16, 0, 0, 0, pal.sup2, 0.75, 0.92);
+  b.cyl(0.05, 0.9, 3, 0, 0, 9.4, pal.sup2, 6, Math.PI / 2);
+  b.box(1, 0.6, 3, 0, 1, 4.6, pal.window);
+  b.box(0.25, 3, 2.6, 0, 1.8, -6.6, pal.sup2);
+  for (const s of [-1, 1]) {
+    wing(b, 6.2, 4.6, 1.8, 2.6, 0.8, 0.1, 0.5, pal.sup2, s);
+    wing(b, 2.6, 2.2, 1, 1, 0.6, 0.2, -7, pal.sup2, s);
+    for (const x of [2.6, 4.4]) b.cyl(0.28, 0.28, 3.2, s * x, -0.6, -0.4, pal.white, 6, Math.PI / 2);
+  }
+  return { geo: b.build(), deck: 0.6, gunZ: 0, gunSize: 0.1, radarY: -0.8, radarZ: 1.5, stacks: [[0, 0, -7]], ciws: [[0, 0, 0]], mastTop: [0, 1, 0], jet: [[0, 0, -8.6, 0.8]] };
+}
+
+function buildPatrol(pal, aew) {
+  const b = new Builder();
+  const L = aew ? 18 : 34;
+  b.cyl(1.7, 1.7, L, 0, 0, 0, pal.sup2, 8, Math.PI / 2);
+  b.cyl(0.4, 1.7, 4, 0, 0, L / 2 + 2, pal.sup2, 8, Math.PI / 2);
+  b.cyl(1.7, 0.4, 7, 0, 0.6, -L / 2 - 3.5, pal.sup2, 8, Math.PI / 2);
+  b.box(1.6, 0.6, 1.2, 0, 1, L / 2 + 1.2, pal.window);
+  const wy = aew ? 1.4 : -0.6;
+  const span = aew ? 13 : 16;
+  for (const s of [-1, 1]) {
+    wing(b, span, 4.4, 1.8, aew ? 0.6 : 3, 1.2, wy, aew ? 1 : 0, pal.sup2, s);
+    wing(b, aew ? 4 : 5.2, 2.6, 1.2, 1.2, 0.6, 0.6, -L / 2 - 4, pal.sup2, s);
+    // engines
+    b.cyl(0.9, 0.9, aew ? 5 : 5.5, s * (aew ? 4.2 : 5.8), wy - 0.9, aew ? 2.4 : 1.6, pal.stack, 7, Math.PI / 2);
+    if (aew) b.box(0.25, 3, 2.2, s * 4.5, 1.6, -L / 2 - 4.2, pal.sup2);
+  }
+  if (!aew) b.box(0.3, 4.5, 3.2, 0, 2.6, -L / 2 - 4.5, pal.sup2);
+  else {
+    b.cyl(0.4, 0.4, 2.4, 0, 2.6, -2, pal.stack, 5);
+    b.cyl(5.2, 5.2, 0.9, 0, 4.2, -2, pal.white, 14);
+  }
+  // patrol plane: MAD tail boom
+  if (!aew) b.cyl(0.25, 0.25, 4, 0, 0.6, -L / 2 - 8.5, pal.stack, 5, Math.PI / 2);
+  return { geo: b.build(), deck: 1.5, gunZ: 0, gunSize: 0.1, radarY: -1.2, radarZ: 2, stacks: [[0, 0, -L / 2]], ciws: [[0, 0, 0]], mastTop: [0, 2, 0] };
+}
+
 const cache = new Map();
 let hullMat = null;
 
@@ -421,6 +508,10 @@ export function buildShipModel(cls, side) {
       helo: () => buildHelo(pal),
       drone: () => buildDrone(pal, false),
       strike: () => buildDrone(pal, true),
+      fighter: () => buildFighter(pal),
+      jet: () => buildJet(pal),
+      mpa: () => buildPatrol(pal, false),
+      aew: () => buildPatrol(pal, true),
       cargo: () => buildCargo(pal),
       tanker: () => buildTanker(pal),
     };
@@ -470,6 +561,14 @@ export function buildShipModel(cls, side) {
     );
     rotor.position.y = def.rotor.y;
     body.add(rotor);
+  }
+  // jet exhaust: a hot core that blooms
+  if (def.jet) {
+    for (const [x, y, z, r] of def.jet) {
+      const e = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.7, 0.8, 6).rotateX(Math.PI / 2), lightMat(4, 1.6, 0.5));
+      e.position.set(x, y, z);
+      body.add(e);
+    }
   }
   if (c.air || cls === 'ssk' || c.civ) {
     turret.visible = false;
