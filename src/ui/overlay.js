@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CLASSES, AIR_SUPPORT } from '../config.js';
 import { radarRange } from '../sim/world.js';
-import { islandRadius, lanePath } from '../sim/map.js';
+import { islandRadius } from '../sim/map.js';
 
 const FRIEND = '#62d8ff';
 const HOSTILE = '#ff4d3d';
@@ -372,14 +372,6 @@ export class Overlay {
     const map = g.state.map;
     if (!map) return;
     const ctx = this.ctx;
-    ctx.strokeStyle = 'rgba(155,232,155,0.24)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([10, 14]);
-    for (const dir of [1, -1]) {
-      const path = lanePath(map.lane, dir, map.lane.width / 2);
-      for (let i = 0; i < path.length - 1; i++) this.groundLine(path[i].x, path[i].z, path[i + 1].x, path[i + 1].z);
-    }
-    ctx.setLineDash([]);
     const cp = g.state.cp;
     const own = cp.owner === g.side;
     const col = own ? FRIEND : cp.owner ? HOSTILE : '#e8eef2';
@@ -797,16 +789,6 @@ export class Overlay {
         }
         ctx.fill();
       }
-      ctx.strokeStyle = 'rgba(155,232,155,0.22)';
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      map.lane.pts.forEach((q, i) => {
-        const [lx, ly] = P(q.x, q.z);
-        if (i) ctx.lineTo(lx, ly);
-        else ctx.moveTo(lx, ly);
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
       const cp = g.state.cp;
       const [cx, cy] = P(cp.x, cp.z);
       ctx.strokeStyle = cp.owner === g.side ? FRIEND : cp.owner ? HOSTILE : 'rgba(232,238,242,0.8)';

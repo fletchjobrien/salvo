@@ -118,7 +118,7 @@ export function generateMap(seed = Math.floor(Math.random() * 1e9)) {
     if (fits(isl)) islands.push(isl);
   }
   // channels across the middle, mostly between the fleets
-  const want = islands.length + 3 + Math.floor(rnd() * 3);
+  const want = islands.length + 5 + Math.floor(rnd() * 3);
   for (let i = 0; i < 400 && islands.length < want; i++) {
     const wide = i > 200;
     const isl = make(r(wide ? -6500 : -4200, wide ? 6500 : 4200), r(-half + 700, half - 700), r(280, 760));

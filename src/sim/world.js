@@ -128,7 +128,8 @@ export class World {
       });
     }
     // a few freighters already under way
-    for (const t of [0.2, 0.5, 0.8]) w.spawnCivilian(t, Math.random() < 0.5 ? 1 : -1);
+    for (const t of [0.25, 0.7]) w.spawnCivilian(t, Math.random() < 0.5 ? 1 : -1);
+    for (let i = 0; i < 3; i++) w.spawnRoamer(true);
     for (let i = 0; i < 3; i++) w.spawnWhale();
     return w;
   }
@@ -198,6 +199,34 @@ export class World {
     const name = 'MV ' + CIV_NAMES[Math.floor(Math.random() * CIV_NAMES.length)];
     const s = this.spawnShip('civ', { cls, modules: [], name, hull: 'CIVILIAN' }, p.x, p.z, Math.atan2(next.x - p.x, next.z - p.z));
     s.waypoints = path.slice(p.next);
+    s.throttle = 3;
+    s.speed = s.spec.maxSpeed * 0.8;
+    s.civ = true;
+    return s;
+  }
+
+  // A merchant off the lane: comes in from any edge of the map (or is
+  // already under way somewhere at the start) and crosses to another edge.
+  spawnRoamer(inside) {
+    const R = WORLD.radius + 200;
+    const a = rand(0, TAU);
+    const b = a + Math.PI + rand(-1, 1);
+    let x = Math.cos(a) * R;
+    let z = Math.sin(a) * R;
+    if (inside) {
+      for (let i = 0; i < 30; i++) {
+        x = rand(-7000, 7000);
+        z = rand(-7000, 7000);
+        const clearOfFleets = Math.abs(z) < START_DISTANCE / 2 - 1800 || Math.abs(x) > 3000;
+        if (clearOfFleets && Math.hypot(x, z) < WORLD.radius - 500 && !nearCoast(this.map, x, z, 300)) break;
+      }
+    }
+    const exit = { x: Math.cos(b) * R, z: Math.sin(b) * R };
+    const mid = this.clearOfLand((x + exit.x) / 2 + rand(-2500, 2500), (z + exit.z) / 2 + rand(-2500, 2500), 150);
+    const cls = Math.random() < 0.6 ? 'cargo' : 'tanker';
+    const name = 'MV ' + CIV_NAMES[Math.floor(Math.random() * CIV_NAMES.length)];
+    const s = this.spawnShip('civ', { cls, modules: [], name, hull: 'CIVILIAN' }, x, z, Math.atan2(mid.x - x, mid.z - z));
+    s.waypoints = inside ? [exit] : [mid, exit];
     s.throttle = 3;
     s.speed = s.spec.maxSpeed * 0.8;
     s.civ = true;
@@ -500,7 +529,10 @@ export class World {
     if (this.civT <= 0) {
       this.civT = rand(30, 50);
       this.civDir = -this.civDir;
-      if (this.ships.filter((s) => s.civ && s.alive).length < 6) this.spawnCivilian(this.civDir > 0 ? 0.02 : 0.98, this.civDir);
+      if (this.ships.filter((s) => s.civ && s.alive && !s.spec.bio && !s.spec.air).length < 8) {
+        if (Math.random() < 0.45) this.spawnCivilian(this.civDir > 0 ? 0.02 : 0.98, this.civDir);
+        else this.spawnRoamer(false);
+      }
     }
     // downed aircraft vanish once they hit the water
     if (this.ships.some((s) => isAir(s) && !s.alive && s.sinkT > 6)) {
@@ -531,6 +563,15 @@ export class World {
 
   // ---------------------------------------------------------------- sensors
   // pos: an estimated position (passive sonar); default is the true one.
+  // Intercepting someone's emissions gives a bearing, not a range: the plot
+  // shows a rough position that wanders, worse the farther away it is.
+  roughFix(e, dist) {
+    const err = dist * SENSORS.esmError;
+    const a = e.id * 2.4 + this.time * 0.05;
+    const k = 0.5 + 0.5 * Math.sin(this.time * 0.13 + e.id);
+    return { x: e.x + Math.sin(a) * err * k, z: e.z + Math.cos(a) * err * k };
+  }
+
   upsert(side, e, level, pos = null) {
     const C = this.contacts[side];
     const c = C.get(e.id);
@@ -570,15 +611,19 @@ export class World {
           }
         }
         // a radiating radar gives itself away
-        if (!seen && e.radar && !e.submerged && own.some((f) => Math.hypot(e.x - f.x, e.z - f.z) < radarRange(e) * SENSORS.counter)) {
-          this.upsert(side, e, 0);
+        if (!seen && e.radar && !e.submerged) {
+          const near = own.reduce((b, f) => Math.min(b, Math.hypot(e.x - f.x, e.z - f.z)), Infinity);
+          if (near < radarRange(e) * SENSORS.counter) this.upsert(side, e, 0, this.roughFix(e, near));
         }
       }
       // jamming cones give away the jammer to everyone inside them
       for (const j of this.jams) {
         if (j.side === side) continue;
         const js = this.byId.get(j.ship);
-        if (js && own.some((f) => jammedAt([j], side, f.x, f.z))) this.upsert(side, js, 0);
+        if (js && own.some((f) => jammedAt([j], side, f.x, f.z))) {
+          const near = own.reduce((b, f) => Math.min(b, Math.hypot(js.x - f.x, js.z - f.z)), Infinity);
+          this.upsert(side, js, 0, this.roughFix(js, near));
+        }
       }
       // radar pings
       for (const f of own) {
@@ -594,8 +639,8 @@ export class World {
           for (const e of this.ships) {
             if (e.side === side || !e.alive || e.submerged || e.spec.bio) continue;
             const d = Math.hypot(e.x - f.x, e.z - f.z);
-            // close inshore a ship hides in the land clutter
-            const r2 = !isAir(e) && nearCoast(this.map, e.x, e.z, COAST_MASK) ? range * 0.5 : range;
+            // small hulls echo less; close inshore a ship hides in land clutter
+            const r2 = range * (e.spec.rcs ?? 1) * (!isAir(e) && nearCoast(this.map, e.x, e.z, COAST_MASK) ? 0.5 : 1);
             if (d < r2 && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) this.upsert(side, e, d < range * r.ident ? 1 : 0);
           }
         });

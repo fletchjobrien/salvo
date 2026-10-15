@@ -219,7 +219,7 @@ class Game {
     this.rig.focus(f.x, f.z, 480);
     this.selectShips(mine.map((s) => s.id));
     this.hud.message(`${this.side === 'blue' ? 'COALITION TASK GROUP' : 'RED PACT SURFACE GROUP'} — ALL STATIONS READY`, 'friend');
-    this.hud.message('Take the control point or sink the enemy. Watch the shipping lane — unknown contacts may be civilian.', 'warn');
+    this.hud.message('Take the control point or sink the enemy. Merchant ships, airliners and whales are about — unknown contacts may be civilian.', 'warn');
     setTimeout(() => this.audio.say('All stations ready. Take the control point.'), 400);
   }
 

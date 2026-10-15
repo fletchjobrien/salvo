@@ -19,24 +19,24 @@ export const KNOTS = 1.9; // display factor: knots per world unit/sec
 // Hulls. Weapons and sensors come from fitted modules (src/fleet.js).
 export const CLASSES = {
   // noise: how loud the hull is to passive sonar (scaled by speed)
-  ddg: { label: 'Destroyer', short: 'DDG', len: 62, beam: 8, maxSpeed: 16, accel: 1.3, turnRate: 0.13, hp: 100, chaff: 4, vls: [18, -10], noise: 1.0 },
-  ffg: { label: 'Frigate', short: 'FFG', len: 48, beam: 6.5, maxSpeed: 18, accel: 1.5, turnRate: 0.16, hp: 70, chaff: 3, vls: [12], noise: 0.9 },
-  fac: { label: 'Corvette', short: 'FAC', len: 26, beam: 4.5, maxSpeed: 26, accel: 2.6, turnRate: 0.24, hp: 36, chaff: 2, vls: [-6], noise: 0.8 },
-  ssk: { label: 'Submarine', short: 'SSK', len: 56, beam: 7, maxSpeed: 13, accel: 1.0, turnRate: 0.12, hp: 60, chaff: 2, vls: [6], noise: 0.6, sub: true },
+  ddg: { label: 'Destroyer', short: 'DDG', len: 62, beam: 8, maxSpeed: 16, accel: 1.3, turnRate: 0.13, hp: 100, chaff: 4, vls: [18, -10], noise: 1.0, rcs: 1 },
+  ffg: { label: 'Frigate', short: 'FFG', len: 48, beam: 6.5, maxSpeed: 18, accel: 1.5, turnRate: 0.16, hp: 70, chaff: 3, vls: [12], noise: 0.9, rcs: 0.85 },
+  fac: { label: 'Corvette', short: 'FAC', len: 26, beam: 4.5, maxSpeed: 26, accel: 2.6, turnRate: 0.24, hp: 36, chaff: 2, vls: [-6], noise: 0.8, rcs: 0.6 },
+  ssk: { label: 'Submarine', short: 'SSK', len: 56, beam: 7, maxSpeed: 13, accel: 1.0, turnRate: 0.12, hp: 60, chaff: 2, vls: [6], noise: 0.6, sub: true, rcs: 0.45 },
   // aircraft (launched from deck modules)
-  helo: { label: 'ASW Helicopter', short: 'HELO', len: 14, beam: 3, maxSpeed: 45, accel: 10, turnRate: 0.9, hp: 12, chaff: 0, vls: [0], noise: 0, air: true, alt: 60 },
-  drone: { label: 'Recon Drone', short: 'UAV', len: 9, beam: 12, maxSpeed: 70, accel: 12, turnRate: 0.45, hp: 8, chaff: 0, vls: [0], noise: 0, air: true, alt: 180 },
-  strike: { label: 'Strike Drone', short: 'UCAV', len: 12, beam: 15, maxSpeed: 85, accel: 14, turnRate: 0.4, hp: 10, chaff: 0, vls: [0], noise: 0, air: true, alt: 140 },
+  helo: { label: 'ASW Helicopter', short: 'HELO', len: 14, beam: 3, maxSpeed: 45, accel: 10, turnRate: 0.9, hp: 12, chaff: 0, vls: [0], noise: 0, air: true, alt: 60, rcs: 0.55 },
+  drone: { label: 'Recon Drone', short: 'UAV', len: 9, beam: 12, maxSpeed: 70, accel: 12, turnRate: 0.45, hp: 8, chaff: 0, vls: [0], noise: 0, air: true, alt: 180, rcs: 0.35 },
+  strike: { label: 'Strike Drone', short: 'UCAV', len: 12, beam: 15, maxSpeed: 85, accel: 14, turnRate: 0.4, hp: 10, chaff: 0, vls: [0], noise: 0, air: true, alt: 140, rcs: 0.45 },
   // off-map air support
-  fighter: { label: 'Fighter', short: 'FTR', len: 16, beam: 11, maxSpeed: 150, accel: 40, turnRate: 1.0, hp: 14, chaff: 0, vls: [0], noise: 0, air: true, alt: 420 },
-  jet: { label: 'Strike Jet', short: 'ATK', len: 18, beam: 13, maxSpeed: 130, accel: 35, turnRate: 0.8, hp: 16, chaff: 0, vls: [0], noise: 0, air: true, alt: 300 },
-  mpa: { label: 'Patrol Aircraft', short: 'MPA', len: 38, beam: 36, maxSpeed: 80, accel: 15, turnRate: 0.35, hp: 30, chaff: 0, vls: [0], noise: 0, air: true, alt: 500 },
-  aew: { label: 'AEW Aircraft', short: 'AEW', len: 32, beam: 30, maxSpeed: 75, accel: 15, turnRate: 0.35, hp: 26, chaff: 0, vls: [0], noise: 0, air: true, alt: 650 },
+  fighter: { label: 'Fighter', short: 'FTR', len: 16, beam: 11, maxSpeed: 150, accel: 40, turnRate: 1.0, hp: 14, chaff: 0, vls: [0], noise: 0, air: true, alt: 420, rcs: 0.5 },
+  jet: { label: 'Strike Jet', short: 'ATK', len: 18, beam: 13, maxSpeed: 130, accel: 35, turnRate: 0.8, hp: 16, chaff: 0, vls: [0], noise: 0, air: true, alt: 300, rcs: 0.6 },
+  mpa: { label: 'Patrol Aircraft', short: 'MPA', len: 38, beam: 36, maxSpeed: 80, accel: 15, turnRate: 0.35, hp: 30, chaff: 0, vls: [0], noise: 0, air: true, alt: 500, rcs: 1.1 },
+  aew: { label: 'AEW Aircraft', short: 'AEW', len: 32, beam: 30, maxSpeed: 75, accel: 15, turnRate: 0.35, hp: 26, chaff: 0, vls: [0], noise: 0, air: true, alt: 650, rcs: 1.2 },
   // civilians on the shipping lane
-  cargo: { label: 'Container Ship', short: 'CIV', len: 110, beam: 16, maxSpeed: 9, accel: 0.4, turnRate: 0.05, hp: 60, chaff: 0, vls: [0], civ: true, noise: 1.3 },
-  whale: { label: 'Whale', short: 'BIO', len: 16, beam: 4, maxSpeed: 2.5, accel: 0.3, turnRate: 0.12, hp: 12, chaff: 0, vls: [0], civ: true, bio: true, noise: 0.75, sub: true },
-  airliner: { label: 'Airliner', short: 'CIV', len: 40, beam: 36, maxSpeed: 210, accel: 20, turnRate: 0.25, hp: 30, chaff: 0, vls: [0], civ: true, air: true, alt: 1150, noise: 0 },
-  tanker: { label: 'Tanker', short: 'CIV', len: 128, beam: 19, maxSpeed: 8, accel: 0.35, turnRate: 0.045, hp: 75, chaff: 0, vls: [0], civ: true, noise: 1.4 },
+  cargo: { label: 'Container Ship', short: 'CIV', len: 110, beam: 16, maxSpeed: 9, accel: 0.4, turnRate: 0.05, hp: 60, chaff: 0, vls: [0], civ: true, noise: 1.3, rcs: 1.4 },
+  whale: { label: 'Whale', short: 'BIO', len: 16, beam: 4, maxSpeed: 2.5, accel: 0.3, turnRate: 0.12, hp: 12, chaff: 0, vls: [0], civ: true, bio: true, noise: 0.75, sub: true, rcs: 0 },
+  airliner: { label: 'Airliner', short: 'CIV', len: 40, beam: 36, maxSpeed: 210, accel: 20, turnRate: 0.25, hp: 30, chaff: 0, vls: [0], civ: true, air: true, alt: 1150, noise: 0, rcs: 1.4 },
+  tanker: { label: 'Tanker', short: 'CIV', len: 128, beam: 19, maxSpeed: 8, accel: 0.35, turnRate: 0.045, hp: 75, chaff: 0, vls: [0], civ: true, noise: 1.4, rcs: 1.5 },
 };
 
 // Anti-ship missiles. `defense` scales how easily SAMs/CIWS kill them.
@@ -93,7 +93,8 @@ export const WEAPONS = {
 
 export const SENSORS = {
   visual: 1300, // lookouts: identify anything this close with line of sight
-  counter: 1.3, // a radiating radar is detected out to this many times its range
+  counter: 1.15, // a radiating radar is detected out to this many times its range (bearing only: a rough position)
+  esmError: 0.15, // that rough position is off by up to this fraction of the distance
   contactLife: 10, // seconds an un-refreshed contact stays on the plot
   seeker: 1700, // missile seeker turns on this far from its aim point
   seekerSearch: 700, // and locks the ship nearest the aim point within this
@@ -123,7 +124,7 @@ export const FORMATION = [
   [420, 180],
 ];
 
-export const START_DISTANCE = 6400;
+export const START_DISTANCE = 12000;
 
 // Ocean waves. Shared by the GPU shader and the CPU (ship bobbing).
 export const WAVES = [
