@@ -103,7 +103,7 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 #speedind { color: var(--amber); }
 #score { color: #9fc8d8; font-size: 20px; }
 #alert {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
   font-family: 'Press Start 2P', monospace; font-size: 16px; letter-spacing: 0.15em;
   color: #fff; background: rgba(170, 20, 10, 0.85); border: 2px solid var(--red);
   padding: 8px 18px; pointer-events: none !important;
@@ -266,3 +266,28 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
   .ed-body { grid-template-columns: 1fr; overflow-y: auto; }
   .ed-col { overflow: visible; }
 }
+
+/* ---------- control point bar */
+#cpbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; font-size: 20px; pointer-events: none !important; text-shadow: 0 2px 0 #000; }
+#cpbar .us { color: var(--cyan); min-width: 30px; text-align: right; }
+#cpbar .them { color: var(--red); min-width: 30px; }
+#cpbar .cpb { position: relative; width: 220px; height: 8px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25); }
+#cpbar .cpb::after { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: rgba(255,255,255,0.5); }
+#cpbar .cpb i { position: absolute; top: 0; bottom: 0; }
+#cpbar .cpb i.u { right: 50%; background: var(--cyan); }
+#cpbar .cpb i.t { left: 50%; background: var(--red); }
+#cpbar em { font-style: normal; color: #cfd8dc; font-size: 17px; margin-left: 4px; }
+#cpbar em.held { color: var(--cyan); }
+#cpbar em.lost { color: var(--red); }
+
+/* fleet creator: module categories */
+.pips i.missiles { background: #ff7a5c; } .pips i.guns { background: #ffbf5a; } .pips i.ew { background: #b98cff; } .pips i.sensors { background: #7dff9a; }
+.slot.missiles { border-color: #ff7a5c; background: rgba(110, 35, 20, 0.7); }
+.slot.guns { border-color: #ffbf5a; background: rgba(100, 70, 15, 0.75); }
+.slot.sensors { border-color: #7dff9a; background: rgba(20, 75, 40, 0.8); }
+.slot.ew { border-color: #b98cff; background: rgba(55, 30, 95, 0.8); }
+.ch.missiles { color: #ff7a5c; } .ch.guns { color: #ffbf5a; } .ch.sensors { color: #7dff9a; } .ch.ew { color: #b98cff; }
+.part.missiles { border-left-color: #ff7a5c; } .part.guns { border-left-color: #ffbf5a; } .part.sensors { border-left-color: #7dff9a; } .part.ew { border-left-color: #b98cff; }
+.slots { grid-template-columns: repeat(3, 1fr); }
+.stats .line { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 10px; font-size: 16px; color: #7fa9ba; border-top: 1px solid rgba(98,216,255,0.08); padding-top: 2px; }
+.stats .line b { color: #fff; font-weight: normal; text-align: right; }

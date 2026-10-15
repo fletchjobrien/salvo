@@ -3,6 +3,7 @@
 // Guest: sends {t:'cmd'}; renders an interpolated Mirror of the host state.
 import { buildSpec } from '../fleet.js';
 import { wrapAngle } from '../sim/world.js';
+import { generateMap } from '../sim/map.js';
 
 export async function createRoomCode() {
   const r = await fetch('/api/room/new');
@@ -72,6 +73,8 @@ const DELAY = 0.15;
 const lerp = (a, b, t) => a + (b - a) * t;
 const lerpAng = (a, b, t) => a + wrapAngle(b - a) * t;
 
+const SIDES = ['blue', 'red', 'civ'];
+
 export class Mirror {
   constructor(init) {
     this.time = 0;
@@ -83,40 +86,49 @@ export class Mirror {
     this.out = [];
     this.winner = null;
     this.renderTime = null;
-    for (const s of init.ships) {
-      const c = buildSpec(s.cls, s.modules || []);
-      const ship = {
-        ...s,
-        spec: c,
-        speed: 0,
-        hp: c.hp,
-        maxHp: c.hp,
-        alive: true,
-        sinkT: 0,
-        ssm: c.ssm,
-        sam: c.sam,
-        chaff: c.chaff,
-        gunAim: 0,
-        fires: [],
-        dmg: { radar: false, engine: false, gun: false },
-        target: null,
-        throttle: 2,
-        waypoints: [],
-        turn: 0,
-        launchQueue: [],
-        chaffCd: 0,
-        radar: true,
-        jammer: false,
-      };
-      this.ships.push(ship);
-      this.byId.set(s.id, ship);
-    }
+    this.map = generateMap(init.seed);
+    this.cp = { ...this.map.cp, progress: 0, owner: null, contested: false, score: { blue: 0, red: 0 } };
+    this.contacts = { blue: new Map(), red: new Map() };
+    this.jams = [];
+    for (const s of init.ships) this.addShip(s);
+  }
+
+  addShip(s) {
+    const c = buildSpec(s.cls, s.modules || []);
+    const ship = {
+      ...s,
+      spec: c,
+      speed: 0,
+      hp: c.hp,
+      maxHp: c.hp,
+      alive: true,
+      sinkT: 0,
+      ammo: { ...c.ammo },
+      ssm: 0,
+      sam: c.sam,
+      chaff: c.chaff,
+      gunAim: 0,
+      fires: [],
+      dmg: { radar: false, engine: false, gun: false },
+      target: null,
+      throttle: 2,
+      waypoints: [],
+      turn: 0,
+      launchQueue: [],
+      chaffCd: 0,
+      jamCd: 0,
+      radar: true,
+      civ: s.side === 'civ',
+    };
+    this.ships.push(ship);
+    this.byId.set(s.id, ship);
+    return ship;
   }
 
   addSnapshot(snap, events) {
     const ships = new Map(snap.ships.map((a) => [a[0], a]));
     const missiles = new Map(snap.missiles.map((a) => [a[0], a]));
-    this.snaps.push({ time: snap.time, ships, missiles, winner: snap.winner });
+    this.snaps.push({ time: snap.time, ships, missiles, winner: snap.winner, contacts: snap.contacts, jams: snap.jams, cp: snap.cp });
     if (events && events.length) this.pendingEvents.push({ time: snap.time, events });
     if (this.snaps.length > 30) this.snaps.shift();
     if (this.renderTime === null) this.renderTime = snap.time - DELAY;
@@ -147,10 +159,18 @@ export class Mirror {
     const span = b.time - a.time;
     const t = span > 0 ? Math.min(1, Math.max(0, (rt - a.time) / span)) : 0;
 
+    // ships that appeared (freighters) or left the map
+    for (const [id, B] of b.ships) {
+      if (!this.byId.has(id)) this.addShip({ id, side: SIDES[B[20]], cls: B[21], name: B[24] || 'MV', hull: 'CIVILIAN', modules: [], x: B[1], z: B[2], heading: B[3] });
+    }
+    if (this.ships.some((s) => !b.ships.has(s.id))) {
+      this.ships = this.ships.filter((s) => b.ships.has(s.id));
+      this.byId = new Map(this.ships.map((s) => [s.id, s]));
+    }
+
     for (const s of this.ships) {
-      const A = a.ships.get(s.id);
-      const B = b.ships.get(s.id) || A;
-      if (!A) continue;
+      const B = b.ships.get(s.id);
+      const A = a.ships.get(s.id) || B;
       s.x = lerp(A[1], B[1], t);
       s.z = lerp(A[2], B[2], t);
       s.heading = lerpAng(A[3], B[3], t);
@@ -165,13 +185,14 @@ export class Mirror {
       s.fires = B[12].map(([lx, lz]) => ({ lx, lz }));
       s.dmg = { radar: !!(B[13] & 1), engine: !!(B[13] & 2), gun: !!(B[13] & 4) };
       s.radar = !(B[13] & 8);
-      s.jammer = !!(B[13] & 16);
       s.target = B[14] || null;
       s.throttle = B[15];
       s.waypoints = B[16].map(([x, z]) => ({ x, z }));
       s.turn = B[17];
       s.launchQueue = new Array(B[18]).fill(0);
       s.chaffCd = B[19];
+      s.ammo = { skimmer: B[22][0], supersonic: B[22][1], cruise: B[22][2] };
+      s.jamCd = B[23];
     }
 
     const list = [];
@@ -188,11 +209,21 @@ export class Mirror {
         pitch: lerp(A[7], B[7], t),
         speed: B[8],
         targetId: B[9],
+        type: B[10] || 'skimmer',
         alive: true,
       });
     }
     this.missiles = list;
     this.winner = b.winner;
+
+    for (const side of ['blue', 'red']) {
+      this.contacts[side] = new Map((b.contacts?.[side] || []).map(([id, x, z, level, ct]) => [id, { id, x, z, level, t: ct }]));
+    }
+    this.jams = (b.jams || []).map(([id, ship, sc, x, z, dir, half, range, jt, max]) => ({ id, ship, side: SIDES[sc], x, z, dir, half, range, t: jt, max }));
+    if (b.cp) {
+      const [progress, owner, sb, sr, contested] = b.cp;
+      Object.assign(this.cp, { progress, owner: owner >= 0 ? SIDES[owner] : null, contested: !!contested, score: { blue: sb, red: sr } });
+    }
 
     while (this.pendingEvents.length && this.pendingEvents[0].time <= rt) {
       this.out.push(...this.pendingEvents.shift().events);

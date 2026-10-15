@@ -93,7 +93,8 @@ export class Hud {
     this.speedInd.textContent = g.paused ? 'PAUSED' : g.mode === 'guest' || g.mode === 'host' ? 'LIVE' : `${g.timeScale}×`;
     const enemies = g.state.ships.filter((s) => s.side !== g.side);
     const mine = g.state.ships.filter((s) => s.side === g.side);
-    this.score.textContent = `SUNK ${enemies.filter((s) => !s.alive).length}/${enemies.length}  LOST ${mine.filter((s) => !s.alive).length}/${mine.length}`;
+    this.score.textContent = `SUNK ${enemies.filter((s) => !s.alive && !s.civ).length}  LOST ${mine.filter((s) => !s.alive).length}/${mine.length}`;
+    this.updateControl();
 
     // threat alert
     const threats = g.state.missiles.filter((m) => m.kind === 'ssm' && m.side !== g.side && g.missileVisible(m));
@@ -106,14 +107,15 @@ export class Hud {
       const hp = Math.max(0, s.hp / s.maxHp);
       c.bar.style.width = `${hp * 100}%`;
       c.bar.style.background = hp > 0.6 ? '#7dff9a' : hp > 0.3 ? '#ffd166' : '#ff5a4a';
-      c.ssm.textContent = `SSM ${s.ssm}`;
+      const a = s.ammo || {};
+      c.ssm.textContent = [a.skimmer ? `SKM ${a.skimmer}` : '', a.supersonic ? `SSN ${a.supersonic}` : '', a.cruise ? `CRU ${a.cruise}` : ''].filter(Boolean).join(' ') || 'NO SSM';
       c.sam.textContent = s.spec && s.spec.sam ? `SAM ${s.sam}` : '';
       c.spd.textContent = `${Math.round(s.speed * KNOTS)}kt`;
       const st = [];
       if (!s.alive) st.push('SINKING');
       else {
-        if (s.radar === false) st.push('SILENT');
-        if (s.jammer) st.push('JAM');
+        if (s.radar === false) st.push('RADAR OFF');
+        if (s.spec.canJam) st.push(s.jamCd > 0 ? `JAM ${Math.ceil(s.jamCd)}s` : 'JAM READY');
         if (s.fires && s.fires.length) st.push('FIRE');
         if (s.dmg.radar) st.push('RADAR');
         if (s.dmg.engine) st.push('ENG');
@@ -128,6 +130,21 @@ export class Hud {
     this.updateOrders();
   }
 
+  // Control point score bar at the top of the screen.
+  updateControl() {
+    const g = this.g;
+    const cp = g.state.cp;
+    const el = document.getElementById('cpbar');
+    if (!cp || !el) return;
+    const foe = g.side === 'blue' ? 'red' : 'blue';
+    const us = cp.score[g.side];
+    const them = cp.score[foe];
+    const status = cp.contested ? 'CONTESTED' : cp.owner === g.side ? 'HELD' : cp.owner ? 'ENEMY HELD' : 'NEUTRAL';
+    el.innerHTML = `<span class="us">${Math.floor(us)}</span>
+      <div class="cpb"><i class="u" style="width:${(us / 300) * 50}%"></i><i class="t" style="width:${(them / 300) * 50}%"></i></div>
+      <span class="them">${Math.floor(them)}</span><em class="${cp.owner === g.side ? 'held' : cp.owner ? 'lost' : ''}">◆ ${status}</em>`;
+  }
+
   updateOrders() {
     const g = this.g;
     const sel = [...g.selected].map((id) => g.shipById(id)).filter((s) => s && s.alive);
@@ -138,9 +155,11 @@ export class Hud {
     const chaffReady = sel.some((s) => s.chaff > 0 && !(s.chaffCd > 0));
     const radarOn = sel.every((s) => s.radar !== false);
     const radarMixed = !radarOn && sel.some((s) => s.radar !== false);
-    const jamOn = sel.length > 0 && sel.every((s) => s.jammer || !s.spec.canJam);
-    const canJam = sel.some((s) => s.spec.canJam);
-    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, radarOn, radarMixed, jamOn, canJam].join('|');
+    const jammers = sel.filter((s) => s.spec.canJam);
+    const canJam = jammers.length > 0;
+    const jamReady = jammers.some((s) => !(s.jamCd > 0));
+    const jamWait = canJam ? Math.ceil(Math.min(...jammers.map((s) => s.jamCd || 0))) : 0;
+    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, g.jamMode, radarOn, radarMixed, canJam, jamReady, jamWait].join('|');
     if (key === this.ordersKey) return;
     this.ordersKey = key;
     if (!sel.length) {
@@ -160,8 +179,8 @@ export class Hud {
       <div class="grp"><span class="lbl">SPEED</span>${speedBtns}</div>
       <div class="grp"><span class="lbl">SALVO</span>${salvoBtns}</div>
       <div class="grp sensors"><span class="lbl">SENSOR</span>
-        <button class="radar ${radarOn ? 'on' : radarMixed ? 'mixed' : 'off'}" data-act="radar" title="Radar active: you see far and SAMs work, but enemy ESM hears you. Silent: hidden, but SAMs are offline.">[B] RADAR ${radarOn ? 'ACTIVE' : radarMixed ? 'MIXED' : 'SILENT'}</button>
-        <button class="jam ${jamOn && canJam ? 'on' : ''}" data-act="jam" ${canJam ? '' : 'disabled'} title="Jammer: shrinks enemy radar range and can spoof missile seekers, but enemy ESM hears it from far away.">[J] JAMMER ${!canJam ? 'NONE' : jamOn ? 'ON' : 'OFF'}</button>
+        <button class="radar ${radarOn ? 'on' : radarMixed ? 'mixed' : 'off'}" data-act="radar" title="Radar on: pings find contacts and SAMs work, but the enemy can see you radiating. Off: hidden, but blind and no SAMs.">[B] RADAR ${radarOn ? 'ON' : radarMixed ? 'MIXED' : 'OFF'}</button>
+        <button class="jam ${g.jamMode ? 'on' : ''}" data-act="jam" ${jamReady ? '' : 'disabled'} title="Aim a jamming cone: blinds enemy radars, SAMs and missile seekers inside it for a few seconds.">[J] JAM ${!canJam ? 'NONE' : jamReady ? 'READY' : jamWait + 's'}</button>
       </div>
       <div class="grp">
         <button class="fire ${g.fireMode ? 'on' : ''}" data-act="fire" ${ssm ? '' : 'disabled'}>[F] FIRE SSM ${ssm}</button>
@@ -176,7 +195,7 @@ export class Hud {
         else if (b.dataset.act === 'fire') g.toggleFireMode();
         else if (b.dataset.act === 'chaff') g.chaff();
         else if (b.dataset.act === 'radar') g.toggleRadar();
-        else if (b.dataset.act === 'jam') g.toggleJammer();
+        else if (b.dataset.act === 'jam') g.toggleJamMode();
       });
     });
   }

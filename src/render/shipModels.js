@@ -35,6 +35,22 @@ const PALETTES = {
   },
 };
 
+PALETTES.civ = {
+  hull: 0x2f3f5a,
+  deck: 0x6b4a3a,
+  sup: 0xe6e2d8,
+  sup2: 0xcfcac0,
+  dark: 0x1a1d22,
+  window: 0x12161b,
+  boot: 0x15181b,
+  red: 0x8a2f24,
+  panel: 0x6f6a60,
+  pad: 0x5a5a55,
+  white: 0xeeeeea,
+  stack: 0xb8452e,
+};
+const CONTAINER_COLORS = [0xb8452e, 0x2e6fb8, 0x3c8a4a, 0xd0a030, 0x8a8a88, 0x6a3fa0, 0xc06a2a];
+
 const _c = new THREE.Color();
 
 function colorize(geo, hex) {
@@ -304,6 +320,43 @@ function buildFAC(pal, side) {
   return { geo: b.build(), deck, gunZ: c.len * 0.3, gunSize: 0.6, radarY: deck + 7.6, radarZ: 0.5, stacks: [[0, deck + 3.4, -2]], ciws: [[0, deck + 2.6, -10.5]], mastTop: [0, deck + 8.4, 0.5] };
 }
 
+function buildCargo(pal) {
+  const c = CLASSES.cargo;
+  const b = new Builder();
+  b.add(hullGeometry(c.len, c.beam, 6, 4.5, pal, { sheer: 0.2 }).geo);
+  const deck = 6.2;
+  // container stacks
+  let k = 0;
+  for (let z = -26; z <= 40; z += 7.5) {
+    const tiers = 2 + ((k * 7) % 3);
+    for (let t = 0; t < tiers; t++) {
+      for (const x of [-4.5, 0, 4.5]) {
+        b.box(4.2, 2.4, 6.8, x, deck + 1.2 + t * 2.5, z, CONTAINER_COLORS[(k * 3 + t * 5 + Math.round(x)) % CONTAINER_COLORS.length]);
+      }
+    }
+    k++;
+  }
+  // aft accommodation block + funnel
+  b.box(13, 9, 9, 0, deck + 4.5, -40, pal.sup);
+  b.box(14, 1, 1.2, 0, deck + 8, -35.6, pal.window);
+  b.box(3, 5, 3.5, 0, deck + 11, -45, pal.stack);
+  return { geo: b.build(), deck, gunZ: 0, gunSize: 0.1, radarY: deck + 11, radarZ: -40, stacks: [[0, deck + 13.5, -45]], ciws: [[0, deck + 10, -40]], mastTop: [0, deck + 13, -40] };
+}
+
+function buildTanker(pal) {
+  const c = CLASSES.tanker;
+  const b = new Builder();
+  b.add(hullGeometry(c.len, c.beam, 5, 5, { ...pal, hull: 0x7a2c24, deck: 0x4a6a4a }, { sheer: 0.15 }).geo);
+  const deck = 5.2;
+  // pipe run and manifolds along the deck
+  b.box(1.2, 1.2, 90, 0, deck + 0.8, 5, pal.panel);
+  for (let z = -30; z <= 45; z += 15) b.box(10, 1.4, 1.4, 0, deck + 1.2, z, pal.panel);
+  b.box(15, 10, 11, 0, deck + 5, -50, pal.sup);
+  b.box(16, 1, 1.2, 0, deck + 9, -44.5, pal.window);
+  b.box(3.2, 5, 3.6, 0, deck + 12, -56, pal.stack);
+  return { geo: b.build(), deck, gunZ: 0, gunSize: 0.1, radarY: deck + 12, radarZ: -50, stacks: [[0, deck + 14.5, -56]], ciws: [[0, deck + 10, -50]], mastTop: [0, deck + 14, -50] };
+}
+
 const cache = new Map();
 let hullMat = null;
 
@@ -325,7 +378,8 @@ export function buildShipModel(cls, side) {
   const key = cls + side;
   if (!cache.has(key)) {
     const pal = PALETTES[side];
-    const def = cls === 'ddg' ? buildDDG(pal, side) : cls === 'ffg' ? buildFFG(pal, side) : buildFAC(pal, side);
+    const def =
+      cls === 'ddg' ? buildDDG(pal, side) : cls === 'ffg' ? buildFFG(pal, side) : cls === 'cargo' ? buildCargo(pal) : cls === 'tanker' ? buildTanker(pal) : buildFAC(pal, side);
     def.turretGeo = turretGeometry(pal, def.gunSize);
     def.barrelGeo = barrelGeometry(pal, def.gunSize);
     def.radarGeo = radarGeometry(pal, cls === 'fac' ? 2.2 : 4);

@@ -338,6 +338,25 @@ export class Audio {
     this.blip(220, 0.12, 'sawtooth', 0.1);
   }
 
+  // Laser: a short rising electric whine.
+  laser(x, y, z) {
+    if (!this.can('laser', 0.25)) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const { input, att } = this.spatial(x, y, z, 0.6, 300, 0.2);
+    if (att < 0.02) return;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(2400, t + 0.2);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.25, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g).connect(input);
+    o.start(t);
+    o.stop(t + 0.3);
+  }
+
   // Radar spinning up (rising sweep) or going dark (falling).
   radarToggle(on) {
     if (!this.ctx || !this.enabled) return;

@@ -100,7 +100,7 @@ export class FleetEditor {
     const d = this.fleet.ships[this.sel];
     if (!d) return;
     this.preview.show(d.cls);
-    this.preview.frame(dt, d.modules.includes('gun'));
+    this.preview.frame(dt, d.modules.some((m) => ['autocannon', 'naval', 'railgun'].includes(m)));
   }
 
   // ---------------------------------------------------------------- edits
@@ -201,8 +201,13 @@ export class FleetEditor {
     const bar = (label, v, max, text) =>
       `<div class="stat"><span>${label}</span><div class="sb"><i style="width:${Math.min(100, (v / max) * 100)}%"></i></div><b>${text}</b></div>`;
     const warn = [];
-    if (!spec.ssm && !spec.gun) warn.push('No weapons — this ship cannot attack.');
-    if (!spec.sam && !spec.ciws) warn.push('No missile defence fitted.');
+    const missiles = Object.values(spec.ammo).reduce((a, b) => a + b, 0);
+    if (!missiles && !spec.guns.length) warn.push('No weapons — this ship cannot attack.');
+    if (!spec.sam && !spec.ciws && !spec.laser && !spec.guns.some((g) => g.antiMissile)) warn.push('No missile defence fitted.');
+    const ammo = Object.entries(spec.ammo).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${MODULES[k].name.split(' ')[0].toUpperCase()}`).join(' · ') || 'none';
+    const guns = spec.guns.map((g) => g.name.replace('127mm Naval', '127mm')).join(', ') || 'none';
+    const radar = spec.radars.map((r) => r.name.replace(' Radar', '')).join(' + ');
+    const jam = spec.jammers.map((j) => j.name).join(', ') || 'none';
     $('ed-fit').innerHTML = `
       <div class="ed-name">
         <input id="ed-name" maxlength="16" value="${esc(d.name)}" spellcheck="false" />
@@ -211,15 +216,15 @@ export class FleetEditor {
       <div class="ed-blurb">${h.blurb}</div>
       <div class="slots">${slots}</div>
       <div class="stats">
-        ${bar('HULL', spec.hp, 130, spec.hp)}
-        ${bar('SPEED', spec.maxSpeed * KNOTS, 70, `${Math.round(spec.maxSpeed * KNOTS)} kt`)}
-        ${bar('MISSILES', spec.ssm, 16, spec.ssm)}
-        ${bar('SAMS', spec.sam, 18, spec.sam)}
-        ${bar('CIWS', spec.ciws, 3, spec.ciws)}
-        ${bar('GUN', spec.gun ? 1 / spec.gun.reload : 0, 2.5, spec.gun ? `${(60 / spec.gun.reload).toFixed(0)} rpm` : 'none')}
-        ${bar('RADAR', spec.radar, 6500, `${(spec.radar / 1000).toFixed(1)} km`)}
-        ${bar('DECOYS', spec.chaff, 12, spec.chaff)}
-        <div class="tags">${spec.canJam ? '<em class="jam">JAMMER</em>' : ''}${spec.esm > 1 ? '<em class="esm">ESM+</em>' : ''}</div>
+        ${bar('HULL', spec.hp, 110, spec.hp)}
+        ${bar('SPEED', spec.maxSpeed * KNOTS, 52, `${Math.round(spec.maxSpeed * KNOTS)} kt`)}
+        ${bar('RADAR', spec.radarRange, 8000, `${(spec.radarRange / 1000).toFixed(1)} km`)}
+        ${bar('SAMS', spec.sam, 24, spec.sam)}
+        <div class="line"><span>MISSILES</span><b>${ammo}</b></div>
+        <div class="line"><span>GUNS</span><b>${guns}</b></div>
+        <div class="line"><span>SENSORS</span><b>${radar}</b></div>
+        <div class="line"><span>JAMMER</span><b>${jam}</b></div>
+        <div class="line"><span>DEFENCE</span><b>${[spec.ciws ? `${spec.ciws}× CIWS` : '', spec.laser ? 'LASER' : '', `${spec.chaff} DECOYS`].filter(Boolean).join(' · ')}</b></div>
       </div>
       <div class="ed-warn">${warn.join('<br>')}</div>`;
 

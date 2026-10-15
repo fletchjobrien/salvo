@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { CLASSES, WEAPONS, SPEED_LEVELS, SENSORS } from './config.js';
-import { World, computeSensors, radarRange } from './sim/world.js';
+import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES } from './config.js';
+import { World, radarRange, jammedAt, isCombatant } from './sim/world.js';
 import { AIController } from './sim/ai.js';
 import { Renderer } from './render/renderer.js';
 import { ENVIRONMENTS } from './render/env.js';
@@ -68,6 +68,9 @@ class Game {
     this.selected = new Set();
     this.hoverId = null;
     this.fireMode = false;
+    this.jamMode = false;
+    this.contacts = new Map();
+    this.visible = new Set();
     this.salvo = 4;
     this.paused = false;
     this.timeScale = 1;
@@ -132,6 +135,7 @@ class Game {
     for (const s of this.world.ships) if (s.side === 'red') s.z -= 2400;
     this.ais = [new AIController(this.world, 'blue'), new AIController(this.world, 'red')];
     this.attract = { t: 0, focus: 0 };
+    this.view.setMap(this.world.map);
     const f = this.world.ships[0];
     this.rig.jumpTo(f.x, f.z, 140, f.heading + 2.4, 0.18);
     this.hud.show(false);
@@ -142,6 +146,7 @@ class Game {
     this.view.clear();
     this.selected.clear();
     this.fireMode = false;
+    this.jamMode = false;
     this.paused = false;
     this.timeScale = 1;
     this.seenVampires.clear();
@@ -207,14 +212,15 @@ class Game {
     $('end').classList.add('hidden');
     this.hud.show(true);
     this.overlay.resize();
+    this.view.setMap(this.state.map);
     const mine = this.state.ships.filter((s) => s.side === this.side);
     const f = mine[0];
     this.rig.jumpTo(f.x, f.z, 260, f.heading + Math.PI * 0.8, 0.3);
     this.rig.focus(f.x, f.z, 480);
     this.selectShips(mine.map((s) => s.id));
     this.hud.message(`${this.side === 'blue' ? 'COALITION TASK GROUP' : 'RED PACT SURFACE GROUP'} — ALL STATIONS READY`, 'friend');
-    this.hud.message('Enemy surface group reported ahead. Close and engage.', 'warn');
-    setTimeout(() => this.audio.say('All stations ready. Enemy surface group reported ahead.'), 400);
+    this.hud.message('Take the control point or sink the enemy. Watch the shipping lane — unknown contacts may be civilian.', 'warn');
+    setTimeout(() => this.audio.say('All stations ready. Take the control point.'), 400);
   }
 
   async hostGame() {
@@ -397,6 +403,7 @@ class Game {
   }
 
   toggleFireMode() {
+    this.jamMode = false;
     const ids = this.liveSelected().filter((id) => this.shipById(id).ssm > 0);
     if (!ids.length) {
       this.audio.deny();
@@ -410,23 +417,23 @@ class Game {
 
   fireAt(target) {
     const ids = this.liveSelected();
-    const c = this.contactPos(target) || target;
-    const shooters = ids
-      .map((id) => this.shipById(id))
-      .filter((s) => s.ssm > 0 && Math.hypot(s.x - c.x, s.z - c.z) < WEAPONS.ssm.range);
+    const c = this.contactPos(target);
+    if (!c) return;
+    const reach = (s) => Object.entries(s.ammo || {}).some(([k, n]) => n > 0 && Math.hypot(s.x - c.x, s.z - c.z) < MISSILE_TYPES[k].range);
+    const shooters = ids.map((id) => this.shipById(id)).filter(reach);
     if (!shooters.length) {
       this.audio.deny();
       const any = ids.some((id) => this.shipById(id).ssm > 0);
-      this.hud.message(any ? `Target out of missile range (${(WEAPONS.ssm.range / 1000).toFixed(1)} km).` : 'No missiles remaining.', 'warn');
+      this.hud.message(any ? 'Target out of missile range.' : 'No missiles remaining.', 'warn');
       return;
     }
     this.issue({ type: 'fire', ships: shooters.map((s) => s.id), target: target.id, count: this.salvo });
     this.fireMode = false;
     this.audio.order();
     const n = Math.min(this.salvo, shooters.reduce((a, s) => a + s.ssm, 0));
-    if (c.esm) {
-      this.hud.message(`SALVO ×${n} ON ESM BEARING → ${CLASSES[target.cls].short} EMITTER`, 'friend');
-      this.audio.say(`Salvo, ${n} birds, firing on bearing.`, true);
+    if (c.level === 0) {
+      this.hud.message(`SALVO ×${n} → UNKNOWN CONTACT`, 'friend');
+      this.audio.say(`Salvo, ${n} birds, unknown contact.`, true);
     } else {
       this.hud.message(`SALVO ×${n} → ${CLASSES[target.cls].short} ${target.name.toUpperCase()}`, 'friend');
       this.audio.say(`Salvo, ${n} birds. Target ${target.name}.`, true);
@@ -442,24 +449,43 @@ class Game {
     this.audio.radarToggle(on);
   }
 
-  toggleJammer() {
-    const ships = this.liveSelected()
+  // Jamming is aimed: J, then click where to point the cone.
+  jammers() {
+    return this.liveSelected()
       .map((id) => this.shipById(id))
       .filter((s) => s.spec.canJam);
-    if (!ships.length) {
-      this.hud.message('No jammer fitted on the selected ships.', 'warn');
-      return this.audio.deny();
-    }
-    const on = !ships.every((s) => s.jammer);
-    this.issue({ type: 'jammer', ships: ships.map((s) => s.id), on });
-    this.audio.jamToggle(on);
   }
 
-  // Where we believe an enemy is: exact for radar tracks, estimated for ESM.
+  toggleJamMode() {
+    this.fireMode = false;
+    const ready = this.jammers().filter((s) => !(s.jamCd > 0));
+    if (!ready.length) {
+      this.hud.message(this.jammers().length ? 'Jammers recharging.' : 'No jammer fitted on the selected ships.', 'warn');
+      this.jamMode = false;
+      return this.audio.deny();
+    }
+    this.jamMode = !this.jamMode;
+    this.audio.blip(this.jamMode ? 620 : 300, 0.08, 'triangle', 0.08);
+  }
+
+  castJam(sx, sy) {
+    const g = this.ground(sx, sy);
+    this.jamMode = false;
+    if (!g) return;
+    const ids = this.jammers()
+      .filter((s) => !(s.jamCd > 0))
+      .map((s) => s.id);
+    if (!ids.length) return this.audio.deny();
+    this.issue({ type: 'jam', ships: ids, x: g.x, z: g.z });
+    this.audio.jamToggle(true);
+  }
+
+  // What we know about a ship: exact for our own, the plotted contact otherwise.
   contactPos(s) {
-    if (s.side === this.side || this.visible.has(s.id)) return { x: s.x, z: s.z };
-    const e = this.esm && this.esm.get(s.id);
-    return e ? { x: e.x, z: e.z, esm: true, err: e.err, jam: e.jam } : null;
+    if (s.side === this.side || this.mode === 'menu') return { x: s.x, z: s.z, level: 1, age: 0 };
+    const c = this.contacts.get(s.id);
+    if (!c) return null;
+    return { x: c.x, z: c.z, level: c.level, age: this.state.time - c.t };
   }
 
   chaff() {
@@ -480,7 +506,8 @@ class Game {
     if (m.side === this.side) return true;
     for (const s of this.state.ships) {
       if (s.side !== this.side || !s.alive) continue;
-      const r = s.radar === false ? SENSORS.visual * 1.4 : radarRange(s);
+      const blind = !s.radar || jammedAt(this.state.jams, this.side, s.x, s.z);
+      const r = blind ? SENSORS.visual * 1.4 : radarRange(s);
       if ((m.x - s.x) ** 2 + (m.z - s.z) ** 2 < r * r) return true;
     }
     return false;
@@ -494,8 +521,9 @@ class Game {
       const c = this.contactPos(s);
       if (!c) continue;
       if (filter && !filter(s)) continue;
-      const p = c.esm ? this.overlay.project(c.x, 8, c.z) : this.overlay.marker(s);
-      if (c.esm) {
+      const unknown = c.level === 0;
+      const p = unknown ? this.overlay.project(c.x, 8, c.z) : this.overlay.marker(s);
+      if (unknown) {
         p.hullX = p.x;
         p.hullY = p.y;
         p.len = 0;
@@ -610,6 +638,10 @@ class Game {
       if (!this.inBattle()) return;
       this.mouse = { x: e.clientX, y: e.clientY };
       if (e.button === 0) {
+        if (this.jamMode) {
+          this.castJam(e.clientX, e.clientY);
+          return;
+        }
         if (this.fireMode) {
           const t = this.pickShip(e.clientX, e.clientY, (s) => s.side !== this.side);
           if (t) this.fireAt(t);
@@ -642,7 +674,7 @@ class Game {
       }
       const h = this.pickShip(e.clientX, e.clientY);
       this.hoverId = h ? h.id : null;
-      gl.style.cursor = this.fireMode ? 'none' : h ? 'pointer' : 'default';
+      gl.style.cursor = this.fireMode || this.jamMode ? 'none' : h ? 'pointer' : 'default';
     });
 
     window.addEventListener('mouseup', (e) => {
@@ -672,7 +704,10 @@ class Game {
             this.lastClick = { id: s.id, t: now };
             this.selectShips([s.id], d.shift);
           } else if (s) {
-            this.hud.message(`${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()} — ${Math.round((s.hp / s.maxHp) * 100)}% — right-click to target, F to fire`, 'enemy');
+            const c = this.contactPos(s);
+            if (c.level === 0) this.hud.message('UNKNOWN CONTACT — get closer or use radar to identify. F to fire anyway.', 'warn');
+            else if (s.civ) this.hud.message(`CIVILIAN ${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()} — do not engage`, 'good');
+            else this.hud.message(`${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()} — ${Math.round((s.hp / s.maxHp) * 100)}% — right-click to target, F to fire`, 'enemy');
           } else if (!d.shift) this.selected.clear();
         }
       } else if (d.btn === 2 && !d.moved) {
@@ -716,11 +751,12 @@ class Game {
   rightClick(sx, sy, shift) {
     const ids = this.liveSelected();
     if (!ids.length) return;
-    if (this.fireMode) {
+    if (this.fireMode || this.jamMode) {
       this.fireMode = false;
+      this.jamMode = false;
       return;
     }
-    const t = this.pickShip(sx, sy, (s) => s.side !== this.side);
+    const t = this.pickShip(sx, sy, (s) => s.side !== this.side && isCombatant(s) && this.contactPos(s).level > 0);
     if (t) {
       this.issue({ type: 'target', ships: ids, target: t.id });
       this.audio.order();
@@ -764,7 +800,7 @@ class Game {
     } else if (k === 'KeyF') this.toggleFireMode();
     else if (k === 'KeyG') this.chaff();
     else if (k === 'KeyB') this.toggleRadar();
-    else if (k === 'KeyJ') this.toggleJammer();
+    else if (k === 'KeyJ') this.toggleJamMode();
     else if (k === 'KeyZ') this.setSalvo(2);
     else if (k === 'KeyX') this.setSalvo(4);
     else if (k === 'KeyC') this.setSalvo(6);
@@ -774,7 +810,7 @@ class Game {
       e.preventDefault();
       this.setSpeed(0);
     } else if (k === 'Escape') {
-      if (this.fireMode) this.fireMode = false;
+      if (this.fireMode || this.jamMode) this.fireMode = this.jamMode = false;
       else this.selected.clear();
     } else if (k === 'Space') {
       e.preventDefault();
@@ -890,46 +926,68 @@ class Game {
           }
           break;
         case 'emcon':
-          if (mine) this.hud.message(`${s.name.toUpperCase()}: radar ${e.on ? 'ACTIVE' : 'SILENT — SAMs offline'}`, e.on ? 'friend' : 'warn');
+          if (mine) this.hud.message(`${s.name.toUpperCase()}: radar ${e.on ? 'ON' : 'OFF — hidden, but SAMs offline'}`, e.on ? 'friend' : 'warn');
           break;
-        case 'jam':
-          if (mine) {
-            this.hud.message(`${s.name.toUpperCase()}: jammer ${e.on ? 'ON' : 'off'}`, 'ew');
-            if (e.on) this.audio.say('Jammer active.');
+        case 'ping':
+          if (e.side === me && s && this.inBattle()) {
+            this.overlay.radarPing(s, e.r, e.blind);
+            if (e.blind && this.audio.can('blind' + s.id, 8)) this.hud.message(`${s.name.toUpperCase()}: radar jammed!`, 'ew');
           }
           break;
-        case 'esm':
+        case 'jam':
           if (e.side === me && s) {
-            const ref = this.state.ships.find((q) => q.side === me && q.alive);
-            const c = this.esm.get(s.id) || s;
-            const brg = ref ? Math.round(((Math.atan2(c.x - ref.x, c.z - ref.z) * 180) / Math.PI + 360) % 360) : 0;
-            if (e.jam) {
-              this.hud.message(`ESM: ENEMY JAMMING, BRG ${String(brg).padStart(3, '0')}`, 'ew');
-              this.audio.say('Enemy jamming detected.');
-            } else {
-              this.hud.message(`ESM: ${CLASSES[s.cls].short} RADAR EMITTER, BRG ${String(brg).padStart(3, '0')}`, 'warn');
-              this.audio.say('E S M contact.');
-            }
-            this.audio.esm();
+            this.hud.message(`${s.name.toUpperCase()}: jamming sector`, 'ew');
+            this.audio.say('Jamming.');
           }
           break;
         case 'jammed':
-          if (s && s.side === me) {
-            this.hud.message(`${s.name.toUpperCase()}: jammer spoofed a missile seeker!`, 'good');
-            this.audio.say('Seeker spoofed!');
-          } else if (e.side === me) {
-            this.hud.message('One of our missiles was jammed and lost lock.', 'ew');
+          if (e.side === me) {
+            if (this.audio.can('jammedmsg', 4)) this.hud.message('Our missile flew into enemy jamming — seeker blind.', 'ew');
+          } else if (this.audio.can('spoofmsg', 4)) {
+            this.hud.message('Enemy missile blinded by our jamming!', 'good');
+            this.audio.say('Seeker jammed!');
           }
-          this.audio.jamToggle(true);
+          this.audio.jamToggle(false);
           break;
         case 'contact':
-          if (e.side === me && s) {
+          if (e.side === me && s && this.inBattle()) {
             const ref = this.state.ships.find((q) => q.side === me && q.alive);
             const brg = ref ? Math.round(((Math.atan2(s.x - ref.x, s.z - ref.z) * 180) / Math.PI + 360) % 360) : 0;
-            this.hud.message(`NEW CONTACT: ${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()} BRG ${String(brg).padStart(3, '0')}`, 'warn');
-            this.audio.blip(1200, 0.08, 'sine', 0.15);
-            this.audio.say('New surface contact.');
+            if (e.level === 0 && this.audio.can('unk', 3)) {
+              this.hud.message(`UNKNOWN CONTACT BRG ${String(brg).padStart(3, '0')}`, 'warn');
+              this.audio.blip(980, 0.06, 'sine', 0.12);
+            }
           }
+          break;
+        case 'ident':
+          if (e.side === me && s && this.inBattle()) {
+            if (s.civ) this.hud.message(`Contact identified: CIVILIAN ${s.name.toUpperCase()}`, 'good');
+            else {
+              this.hud.message(`Contact identified: ${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()}`, 'enemy');
+              this.audio.blip(1300, 0.08, 'sine', 0.15);
+              if (this.audio.can('identsay', 6)) this.audio.say(`Hostile ${CLASSES[s.cls].label}.`);
+            }
+          }
+          break;
+        case 'cp':
+          if (this.inBattle()) {
+            if (e.owner === me) {
+              this.hud.message('CONTROL POINT CAPTURED', 'good');
+              this.audio.say('Control point secured.');
+            } else if (e.owner) {
+              this.hud.message('ENEMY HAS TAKEN THE CONTROL POINT', 'enemy');
+              this.audio.say('We have lost the control point.', true);
+            } else if (e.lost) this.hud.message('Control point neutral', 'warn');
+          }
+          break;
+        case 'civhit':
+          if (e.side === me) {
+            this.hud.message('WE HIT A CIVILIAN SHIP! −10 points', 'enemy');
+            this.audio.say('Check fire! Civilian vessel hit!', true);
+          } else this.hud.message('Enemy fire hit a civilian ship.', 'warn');
+          break;
+        case 'laser':
+          this.audio.laser(e.x, e.y, e.z);
           break;
         case 'system':
           if (mine) this.hud.message(`${s.name.toUpperCase()}: ${{ radar: 'radar damaged', engine: 'engine room damaged', gun: 'main gun out of action' }[e.sys]}`, 'warn');
@@ -983,13 +1041,16 @@ class Game {
       html += row('Intercepts', a.intercepts, b.intercepts);
       html += row('Shell hits', a.shellHits, b.shellHits);
       html += row('Ships sunk', a.sunk, b.sunk);
+      html += row('Civilians hit', a.civHits, b.civHits);
+      const cp = this.state.cp;
+      if (cp) html += row('Point score', Math.floor(cp.score[this.side]), Math.floor(cp.score[this.side === 'blue' ? 'red' : 'blue']));
     }
     const t = Math.floor(this.state.time);
     html += `<span>Battle time</span><span>${Math.floor(t / 60)}m ${t % 60}s</span><span></span>`;
     $('end-stats').innerHTML = html;
     $('btn-again').textContent = this.net ? 'MAIN MENU' : 'PLAY AGAIN';
     $('end').classList.remove('hidden');
-    this.audio.say(w === 'draw' ? 'Both fleets destroyed.' : win ? 'Enemy group destroyed. Well done, Captain.' : 'Our task group has been destroyed.', true);
+    this.audio.say(w === 'draw' ? 'The battle is a draw.' : win ? 'Victory. Well done, Captain.' : 'We have been defeated.', true);
   }
 
   // ------------------------------------------------------------ loop
@@ -1056,17 +1117,14 @@ class Game {
     const state = this.state;
     if (!state) return;
 
-    if (this.mode === 'guest') {
-      const sens = computeSensors(state.ships, this.side, state.time);
-      this.visible = sens.visible;
-      this.esm = sens.esm;
-    } else if (this.mode === 'menu') {
-      this.visible = new Set(state.ships.map((s) => s.id));
-      this.esm = new Map();
+    // what our side knows about everyone else
+    if (this.mode === 'menu') {
+      this.contacts = new Map(state.ships.map((s) => [s.id, { id: s.id, x: s.x, z: s.z, level: 1, t: state.time }]));
     } else {
-      this.visible = state.visible[this.side];
-      this.esm = state.esm[this.side];
+      this.contacts = state.contacts[this.side];
     }
+    this.visible = new Set();
+    for (const c of this.contacts.values()) if (c.level > 0) this.visible.add(c.id);
 
     if (this.mode === 'menu') this.updateAttract(dt);
     this.audio.muteVoice = this.mode === 'menu';
@@ -1126,7 +1184,7 @@ class Game {
       a.t = 0;
       a.focus++;
       let subject = live[a.focus % live.length];
-      const threatened = this.world.missiles.find((m) => m.kind === 'ssm' && m.age > 6);
+      const threatened = this.world.missiles.find((m) => m.kind === 'ssm' && m.age > 6 && m.locked);
       if (threatened && Math.random() < 0.6) {
         const tgt = this.world.byId.get(threatened.targetId);
         if (tgt) subject = tgt;

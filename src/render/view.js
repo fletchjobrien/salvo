@@ -187,6 +187,64 @@ function mulberry(a) {
   };
 }
 
+// A playable island: same height profile as the simulation (map.js).
+function battleIsland(isl) {
+  const rnd = mulberry(isl.seed);
+  const rings = 9;
+  const segs = 28;
+  const pos = [];
+  const col = [];
+  const H = (k) => isl.h * Math.pow(Math.max(0, 1 - k * k), 0.7);
+  const jitter = [];
+  for (let j = 0; j < segs; j++) jitter.push(0.85 + rnd() * 0.3);
+  const vert = (ri, j) => {
+    const k = ri / rings;
+    const a = (j / segs) * Math.PI * 2;
+    const rr = ri === rings ? isl.r * 1.06 : isl.r * k * jitter[j % segs];
+    const y = ri === rings ? -4 : H(Math.min(1, rr / isl.r)) * (0.9 + rnd() * 0.2);
+    return [Math.cos(a) * rr, y, Math.sin(a) * rr];
+  };
+  const grid = [];
+  for (let ri = 0; ri <= rings; ri++) {
+    grid.push([]);
+    for (let j = 0; j < segs; j++) grid[ri].push(ri === 0 ? [0, H(0), 0] : vert(ri, j));
+  }
+  const color = (y) => (y < isl.h * 0.08 ? [0.62, 0.56, 0.42] : y < isl.h * 0.6 ? [0.22, 0.33, 0.18] : [0.36, 0.35, 0.32]);
+  const tri = (a, b, c) => {
+    pos.push(...a, ...b, ...c);
+    const cc = color((a[1] + b[1] + c[1]) / 3);
+    for (let k = 0; k < 3; k++) col.push(...cc);
+  };
+  for (let ri = 0; ri < rings; ri++) {
+    for (let j = 0; j < segs; j++) {
+      const j1 = (j + 1) % segs;
+      const a = grid[ri][j];
+      const b = grid[ri][j1];
+      const c = grid[ri + 1][j];
+      const d = grid[ri + 1][j1];
+      tri(a, c, b);
+      if (ri > 0) tri(b, c, d);
+      else tri(b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const g = new THREE.Group();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+  g.add(mesh);
+  // surf line
+  const surf = new THREE.Mesh(
+    new THREE.RingGeometry(isl.r * 0.99, isl.r * 1.05, 48).rotateX(-Math.PI / 2),
+    keepAlpha(new THREE.MeshBasicMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.16, depthWrite: false })),
+  );
+  surf.position.y = 0.8;
+  g.add(surf);
+  g.position.set(isl.x, 0, isl.z);
+  return g;
+}
+
 export class GameView {
   constructor(scene, effects) {
     this.scene = scene;
@@ -198,6 +256,38 @@ export class GameView {
     scene.add(this.decor);
     islands(this.decor);
     this.pending = []; // delayed effects
+  }
+
+  // Battle map: islands and the control point buoy.
+  setMap(map) {
+    if (this.mapGroup) this.scene.remove(this.mapGroup);
+    this.mapGroup = new THREE.Group();
+    this.map = map;
+    if (!map) return;
+    for (const isl of map.islands) this.mapGroup.add(battleIsland(isl));
+    const cp = map.cp;
+    const ringMat = keepAlpha(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false }), true);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(cp.r - 5, cp.r, 128).rotateX(-Math.PI / 2), ringMat);
+    ring.position.set(cp.x, 1.0, cp.z);
+    const buoy = new THREE.Group();
+    buoy.add(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3, 6, 8), new THREE.MeshStandardMaterial({ color: 0xd8c040, flatShading: true })));
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(1.2, 6, 4), new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 4, 4), fog: false }));
+    lamp.position.y = 5;
+    buoy.add(lamp);
+    buoy.position.set(cp.x, 1, cp.z);
+    this.cpView = { ring, lamp, buoy };
+    this.mapGroup.add(ring, buoy);
+    this.scene.add(this.mapGroup);
+  }
+
+  updateControl(cp, viewerSide, t) {
+    if (!this.cpView || !cp) return;
+    const col = cp.owner === viewerSide ? [0.45, 0.9, 1.3] : cp.owner ? [1.4, 0.35, 0.3] : [1, 1, 1];
+    const k = cp.contested ? 0.5 + 0.5 * Math.sin(t * 8) : 1;
+    this.cpView.ring.material.color.setRGB(col[0] * k, col[1] * k, col[2] * k);
+    const blink = Math.sin(t * 3) > 0.6 ? 4 : 0.3;
+    this.cpView.lamp.material.color.setRGB(col[0] * blink, col[1] * blink, col[2] * blink);
+    this.cpView.buoy.position.y = waveHeight(cp.x, cp.z, t) * 0.8 + 0.5;
   }
 
   clear() {
@@ -256,10 +346,22 @@ export class GameView {
       }
     }
 
+    if (this.ships.size > state.ships.length || state.ships.some((s) => !this.ships.has(s.id))) {
+      const ids = new Set(state.ships.map((s) => s.id));
+      for (const [id, v] of this.ships) {
+        if (ids.has(id)) continue;
+        this.scene.remove(v.model.group);
+        v.wake.dispose(this.scene);
+        this.ships.delete(id);
+      }
+    }
+    this.updateControl(state.cp, viewerSide, t);
+
     for (const s of state.ships) {
       const v = this.shipView(s);
       const c = CLASSES[s.cls];
       const g = v.model.group;
+      // We only see hulls we have identified (or our own).
       const visible = s.side === viewerSide || visibleSet.has(s.id);
       const hidden = s.sinkT > 45;
       g.visible = visible && !hidden;
@@ -296,7 +398,7 @@ export class GameView {
       v.model.body.rotation.set(v.pitch, 0, v.roll, 'XYZ');
 
       // turret, radar, recoil
-      v.model.turret.visible = !!(s.spec && s.spec.gun);
+      v.model.turret.visible = !!(s.spec && s.spec.guns && s.spec.guns.length);
       v.model.turret.rotation.y = s.gunAim;
       v.recoil = Math.max(0, v.recoil - dt * 4);
       v.model.barrel.position.z = 1.0 * v.model.def.gunSize - v.recoil * 1.2;
@@ -378,7 +480,7 @@ export class GameView {
             const sp = Math.hypot(e.vx, e.vz) || 1;
             this.fx.muzzle(e.x + (e.vx / sp) * 6, e.y, e.z + (e.vz / sp) * 6, e.vx / sp, e.vz / sp);
           }
-          this.fx.shell(e.x, e.y, e.z, e.vx, e.vy, e.vz);
+          this.fx.shell(e.x, e.y, e.z, e.vx, e.vy, e.vz, e.g, e.k);
           break;
         }
         case 'launch':
@@ -397,6 +499,15 @@ export class GameView {
         case 'airburst':
           this.fx.airburst(e.x, e.y, e.z, e.small);
           break;
+        case 'laser': {
+          const s = getShip(e.s);
+          if (!s) break;
+          const v = this.ships.get(s.id);
+          const m = v ? v.model.def.mastTop : [0, 14, 0];
+          const p = this.shipPoint(s, m[0], m[1] - 3, m[2]);
+          this.fx.laser(p.x, p.y, p.z, e.x, e.y, e.z);
+          break;
+        }
         case 'ciws': {
           const s = getShip(e.s);
           if (!s) break;

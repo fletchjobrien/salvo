@@ -184,10 +184,12 @@ class Tracers {
     const keep = [];
     for (const t of this.list) {
       t.life -= dt;
-      t.vy -= (t.grav || 0) * dt;
-      t.x += t.vx * dt;
-      t.y += t.vy * dt;
-      t.z += t.vz * dt;
+      if (!t.fixed) {
+        t.vy -= (t.grav || 0) * dt;
+        t.x += t.vx * dt;
+        t.y += t.vy * dt;
+        t.z += t.vz * dt;
+      }
       if (t.life > 0 && t.y > -1) keep.push(t);
       else if (onLand && t.shell) onLand(t);
     }
@@ -470,8 +472,20 @@ export class Effects {
     if (Math.random() < 0.3) this.flash(fromX, fromY + 2, fromZ, 0xffc080, 6, 80, 0.08);
   }
 
-  shell(x, y, z, vx, vy, vz) {
-    this.tracers.add({ x, y, z, vx, vy, vz, grav: WORLD.gravity, life: 12, len: 14, r: 5, g: 2.6, b: 0.8, shell: true });
+  shell(x, y, z, vx, vy, vz, grav = WORLD.gravity, kind) {
+    if (kind === 'railgun') {
+      // hypervelocity slug: long blue-white streak
+      this.tracers.add({ x, y, z, vx, vy, vz, grav, life: 6, len: 90, r: 4, g: 6, b: 9, shell: true });
+      this.fire.emit(x, y, z, vx * 0.02, 0, vz * 0.02, 0.2, 14, 4, C(4, 6, 9, 1), C(0.5, 1, 2, 0));
+      return;
+    }
+    this.tracers.add({ x, y, z, vx, vy, vz, grav, life: 12, len: kind === 'autocannon' ? 8 : 14, r: 5, g: 2.6, b: 0.8, shell: true });
+  }
+
+  // Point-defence laser: a brief, intense beam from the ship to the missile.
+  laser(x1, y1, z1, x2, y2, z2) {
+    this.tracers.add({ x: x2, y: y2, z: z2, vx: x2 - x1, vy: y2 - y1, vz: z2 - z1, len: Math.hypot(x2 - x1, y2 - y1, z2 - z1), life: 0.07, fixed: true, r: 3, g: 7, b: 9 });
+    this.fire.emit(x2, y2, z2, 0, 0, 0, 0.08, 6, 10, C(4, 8, 10, 1), C(1, 2, 3, 0));
   }
 
   intercept(x, y, z) {

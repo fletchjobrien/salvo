@@ -13,8 +13,8 @@ The game runs fully in the browser (Three.js + WebAudio). A Cloudflare Worker se
 | Right click enemy | Designate gun target |
 | **F**, then click enemy | Launch an anti-ship missile salvo (Z / X / C = 2 / 4 / 6 missiles) |
 | **G** | Fire chaff decoys at incoming missiles |
-| **B** | Radar active / silent (EMCON) |
-| **J** | Jammer on / off |
+| **B** | Radar on / off |
+| **J**, then click | Cast a jamming cone |
 | `[` `]` or R / V, Backspace | Speed down / up, all stop |
 | 1–4, `` ` `` | Select a ship / the whole fleet (double-tap to jump the camera) |
 | H, double-click, Tab | Follow a ship |
@@ -23,25 +23,28 @@ The game runs fully in the browser (Three.js + WebAudio). A Cloudflare Worker se
 | Space, T | Pause, time compression (vs AI only) |
 | ? | Command reference |
 
+### Winning
+
+Each battle has a random map: islands (they block radar and missiles), a shipping lane with civilian freighters, and a control point. Hold the control point alone to capture it; the holder scores, and the first side to 300 wins. Sinking the whole enemy fleet also wins. Hitting a civilian costs 10 points.
+
 ### Fleet creator
 
 Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ships.
 
-- **Hulls:** Corvette (60 pts, 4 slots), Frigate (120 pts, 6 slots), Destroyer (200 pts, 8 slots).
-- **Modules** (one per slot): anti-ship missiles, naval gun, SAM cells, CIWS, decoys, armour, long-range radar, ESM suite, jammer, gas turbines.
-- Click a module to fit it into the selected ship. Click a fitted slot to remove it.
-- Presets: Standard Task Group, Wolfpack, Air Defence Group, Silent Hunters.
+- **Hulls:** Corvette (70 pts, 2 slots), Frigate (140 pts, 4 slots), Destroyer (220 pts, 6 slots).
+- **Missile batteries:** sea-skimmer (4 missiles, 4.2 km, weaves at the end), supersonic (2, 3.3 km, hard to intercept), cruise (2, 7.5 km, flies high then dives).
+- **Guns:** 57mm autocannon (also shoots down nearby missiles), 127mm naval gun, railgun (long, flat, slow-firing).
+- **Defence:** SAM battery, CIWS, point-defence laser, decoy launcher.
+- **Radar arrays:** search (5.2 km), early-warning (8 km, slow pings), fire-control (3.6 km, fast pings, identifies everything).
+- **Jammer arrays:** noise jammer (narrow, 7 km), barrage jammer (wide, 4 km).
 - **ENEMY** on the menu picks the AI fleet: Standard, Random, or Mirror (your own design). In multiplayer each player brings their own fleet.
 
-### Radar and electronic warfare
+### Radar and jamming
 
-- **Radar active**: you track enemy ships at long range and your SAMs work. Enemy ESM (passive receivers) can hear your radar from 1.6 times its range.
-- **Radar silent**: the enemy cannot hear you, but your SAMs go offline and you see only to the horizon (lookouts, about 1.3 km). Other ships in your group still share what their radars see.
-- **ESM contacts** show as amber "?" symbols with a bearing line and an uncertainty circle. You can fire missiles at them; the missile flies to the estimate and its seeker searches for the real ship.
-- **Jammer** (needs a jammer module): enemy radars see a jamming ship at about half range (they burn through at 1.5 km). Missile seekers have a shorter lock range against it and can lose lock. A jammer is heard from 9 km away, so use it when missiles are inbound.
-- The AI starts silent and turns its radar on when it detects you.
-
-Each side gets a standard task group: one destroyer, two frigates and one missile boat. SAMs and CIWS shoot down incoming missiles automatically. Large salvos saturate the defenses, and small salvos usually get shot down.
+- Radar **pings** on a timer and shows its range. Contacts in range appear as amber **unknown** blips; close contacts are **identified**. Every ship has a short navigation radar.
+- A ship with its radar on can be seen by enemies near it. Turn radar off (B) to hide — but you are blind and your SAMs stop working.
+- Missiles fly to the contact and lock the ship nearest their aim point — which may be a freighter.
+- **Jamming** is cast (J, then click): a cone that blinds enemy radars, SAMs and missile seekers inside it for a few seconds, then recharges.
 
 ## Develop
 
