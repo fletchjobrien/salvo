@@ -357,6 +357,41 @@ function buildTanker(pal) {
   return { geo: b.build(), deck, gunZ: 0, gunSize: 0.1, radarY: deck + 12, radarZ: -50, stacks: [[0, deck + 14.5, -56]], ciws: [[0, deck + 10, -50]], mastTop: [0, deck + 14, -50] };
 }
 
+function buildSSK(pal) {
+  const c = CLASSES.ssk;
+  const b = new Builder();
+  // cigar hull lying mostly awash
+  const hull = new THREE.CylinderGeometry(c.beam / 2, c.beam / 2, c.len * 0.8, 10).rotateX(Math.PI / 2);
+  b.add(colorize(hull, pal.dark));
+  b.add(colorize(new THREE.SphereGeometry(c.beam / 2, 10, 6).scale(1, 1, 1.8).translate(0, 0, c.len * 0.4), pal.dark));
+  b.add(colorize(new THREE.ConeGeometry(c.beam / 2, c.len * 0.2, 10).rotateX(-Math.PI / 2).translate(0, 0, -c.len * 0.5), pal.dark));
+  // sail and planes
+  b.taper(2.4, 6, 9, 0, c.beam / 2 + 3, c.len * 0.12, pal.stack, 0.8, 0.8);
+  b.box(8, 0.3, 1.5, 0, c.beam / 2 + 3.5, c.len * 0.14, pal.stack);
+  b.box(0.3, 4, 2, 0, 0, -c.len * 0.47, pal.stack);
+  b.box(7, 0.3, 2, 0, 0, -c.len * 0.45, pal.stack);
+  return { geo: b.build(), deck: c.beam / 2, gunZ: 0, gunSize: 0.1, radarY: c.beam / 2 + 7, radarZ: c.len * 0.12, stacks: [[0, c.beam / 2 + 6, c.len * 0.12]], ciws: [[0, c.beam / 2 + 5, c.len * 0.12]], mastTop: [0, c.beam / 2 + 7.5, c.len * 0.12] };
+}
+
+function buildHelo(pal) {
+  const b = new Builder();
+  b.taper(2.6, 2.6, 7, 0, 0, 1, pal.sup2, 0.8, 0.9);
+  b.box(0.8, 0.8, 8, 0, 0.4, -5, pal.sup2);
+  b.box(0.2, 2.2, 1.2, 0, 1.4, -9, pal.sup2);
+  b.box(1.6, 0.5, 2, 0, 1.2, 4.2, pal.window);
+  return { geo: b.build(), deck: 1.5, gunZ: 0, gunSize: 0.1, radarY: -1.5, radarZ: 1, stacks: [[0, 1.5, -1]], ciws: [[0, 0, 0]], mastTop: [0, 2, 0], rotor: { y: 1.9, r: 7 } };
+}
+
+function buildDrone(pal, strike) {
+  const b = new Builder();
+  b.taper(1.4, 1.2, strike ? 11 : 8, 0, 0, 0, pal.sup2, 0.8, 0.9);
+  b.box(strike ? 15 : 12, 0.25, 1.8, 0, 0.2, 0, pal.sup2);
+  b.box(4.5, 0.2, 1, 0, 0.2, -(strike ? 5 : 3.8), pal.sup2);
+  b.box(0.2, 1.4, 1, 0, 0.9, -(strike ? 5 : 3.8), pal.sup2);
+  if (strike) for (const x of [-4, 4]) b.cyl(0.35, 0.35, 3.4, x, -0.4, 0.4, pal.white, 6, Math.PI / 2);
+  return { geo: b.build(), deck: 0.6, gunZ: 0, gunSize: 0.1, radarY: -0.8, radarZ: 1.5, stacks: [[0, 0, -3]], ciws: [[0, 0, 0]], mastTop: [0, 0.8, 0] };
+}
+
 const cache = new Map();
 let hullMat = null;
 
@@ -378,8 +413,18 @@ export function buildShipModel(cls, side) {
   const key = cls + side;
   if (!cache.has(key)) {
     const pal = PALETTES[side];
-    const def =
-      cls === 'ddg' ? buildDDG(pal, side) : cls === 'ffg' ? buildFFG(pal, side) : cls === 'cargo' ? buildCargo(pal) : cls === 'tanker' ? buildTanker(pal) : buildFAC(pal, side);
+    const builders = {
+      ddg: () => buildDDG(pal, side),
+      ffg: () => buildFFG(pal, side),
+      fac: () => buildFAC(pal, side),
+      ssk: () => buildSSK(pal),
+      helo: () => buildHelo(pal),
+      drone: () => buildDrone(pal, false),
+      strike: () => buildDrone(pal, true),
+      cargo: () => buildCargo(pal),
+      tanker: () => buildTanker(pal),
+    };
+    const def = builders[cls]();
     def.turretGeo = turretGeometry(pal, def.gunSize);
     def.barrelGeo = barrelGeometry(pal, def.gunSize);
     def.radarGeo = radarGeometry(pal, cls === 'fac' ? 2.2 : 4);
@@ -417,5 +462,18 @@ export function buildShipModel(cls, side) {
   top.position.set(...def.mastTop);
   body.add(port, stbd, top);
 
-  return { group, body, turret, barrel, radar, def };
+  let rotor = null;
+  if (def.rotor) {
+    rotor = new THREE.Mesh(
+      new THREE.CircleGeometry(def.rotor.r, 16).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x20262c, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    rotor.position.y = def.rotor.y;
+    body.add(rotor);
+  }
+  if (c.air || cls === 'ssk' || c.civ) {
+    turret.visible = false;
+    port.visible = stbd.visible = !c.air;
+  }
+  return { group, body, turret, barrel, radar, rotor, def };
 }

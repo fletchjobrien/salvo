@@ -14,6 +14,7 @@ import {
   shipCost,
   shipName,
   presetFleet,
+  moduleFits,
 } from '../fleet.js';
 import { buildShipModel } from '../render/shipModels.js';
 
@@ -146,6 +147,7 @@ export class FleetEditor {
 
   fitState(d, mod) {
     const m = MODULES[mod];
+    if (!moduleFits(d.cls, mod)) return { ok: false, why: d.cls === 'ssk' ? 'Not for submarines' : 'Not for this hull' };
     if (d.modules.length >= HULLS[d.cls].slots) return { ok: false, why: 'No free slot' };
     if (m.unique && d.modules.includes(mod)) return { ok: false, why: 'Only one per ship' };
     if (!this.canAfford(m.cost)) return { ok: false, why: 'Over budget' };
@@ -202,12 +204,14 @@ export class FleetEditor {
       `<div class="stat"><span>${label}</span><div class="sb"><i style="width:${Math.min(100, (v / max) * 100)}%"></i></div><b>${text}</b></div>`;
     const warn = [];
     const missiles = Object.values(spec.ammo).reduce((a, b) => a + b, 0);
-    if (!missiles && !spec.guns.length) warn.push('No weapons — this ship cannot attack.');
-    if (!spec.sam && !spec.ciws && !spec.laser && !spec.guns.some((g) => g.antiMissile)) warn.push('No missile defence fitted.');
-    const ammo = Object.entries(spec.ammo).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${MODULES[k].name.split(' ')[0].toUpperCase()}`).join(' · ') || 'none';
+    if (!missiles && !spec.guns.length && !spec.aircraft.includes('strike')) warn.push('No weapons — this ship cannot attack.');
+    if (d.cls !== 'ssk' && !spec.sam && !spec.ciws && !spec.laser && !spec.guns.some((g) => g.antiMissile)) warn.push('No missile defence fitted.');
+    const ammoName = { skimmer: 'SKIMMER', supersonic: 'SUPERSONIC', cruise: 'CRUISE', heavy: 'TORPEDO', light: 'ASW TORP' };
+    const ammo = Object.entries(spec.ammo).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${ammoName[k]}`).join(' · ') || 'none';
     const guns = spec.guns.map((g) => g.name.replace('127mm Naval', '127mm')).join(', ') || 'none';
     const radar = spec.radars.map((r) => r.name.replace(' Radar', '')).join(' + ');
     const jam = spec.jammers.map((j) => j.name).join(', ') || 'none';
+    const extras = [spec.sonar ? spec.sonar.name : '', ...spec.aircraft.map((a) => MODULES[a].name)].filter(Boolean).join(' · ') || 'none';
     $('ed-fit').innerHTML = `
       <div class="ed-name">
         <input id="ed-name" maxlength="16" value="${esc(d.name)}" spellcheck="false" />
@@ -224,6 +228,7 @@ export class FleetEditor {
         <div class="line"><span>GUNS</span><b>${guns}</b></div>
         <div class="line"><span>SENSORS</span><b>${radar}</b></div>
         <div class="line"><span>JAMMER</span><b>${jam}</b></div>
+        <div class="line"><span>SONAR/AIR</span><b>${extras}</b></div>
         <div class="line"><span>DEFENCE</span><b>${[spec.ciws ? `${spec.ciws}× CIWS` : '', spec.laser ? 'LASER' : '', `${spec.chaff} DECOYS`].filter(Boolean).join(' · ')}</b></div>
       </div>
       <div class="ed-warn">${warn.join('<br>')}</div>`;
@@ -236,7 +241,7 @@ export class FleetEditor {
           const st = this.fitState(d, key);
           return `<button class="part ${cat}" data-fit="${key}" ${st.ok ? '' : 'disabled'} title="${st.ok ? '' : st.why}">
             <span class="pn">${m.name}</span><span class="pc">${m.cost}</span>
-            <span class="pd">${m.desc}</span></button>`;
+            <span class="pd">${st.ok || st.why === 'No free slot' || st.why === 'Over budget' ? m.desc : st.why}</span></button>`;
         })
         .join('');
       return `<div class="cat"><div class="ch ${cat}">${label.toUpperCase()}</div>${items}</div>`;

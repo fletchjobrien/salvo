@@ -138,8 +138,23 @@ export class Overlay {
     for (const m of state.missiles) {
       const hostile = m.side !== side;
       if (hostile && !g.missileVisible(m)) continue;
-      const p = this.project(m.x, m.y, m.z);
+      const p = this.project(m.x, Math.max(0, m.y), m.z);
       if (!p.ok) continue;
+      if (m.kind === 'torp') {
+        const a = this.screenHeading({ ...m, y: 0 });
+        ctx.strokeStyle = hostile ? HOSTILE : FRIEND;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x - Math.cos(a) * 7, p.y - Math.sin(a) * 7);
+        ctx.lineTo(p.x + Math.cos(a) * 7, p.y + Math.sin(a) * 7);
+        ctx.stroke();
+        if (hostile) {
+          ctx.font = `14px ${FONT}`;
+          ctx.fillStyle = HOSTILE;
+          ctx.fillText('TORPEDO', p.x + 9, p.y - 6);
+        }
+        continue;
+      }
       if (hostile && m.kind === 'ssm') {
         const a = this.screenHeading(m);
         ctx.save();
@@ -184,14 +199,14 @@ export class Overlay {
       const r = 8;
       ctx.lineWidth = sel || hover ? 2.5 : 1.6;
       ctx.strokeStyle = s.alive ? col : 'rgba(180,180,180,0.7)';
-      ctx.beginPath();
-      if (friendly) ctx.arc(p.x, p.y, r, Math.PI, 0);
-      else {
-        ctx.moveTo(p.x - r, p.y);
-        ctx.lineTo(p.x, p.y - r);
-        ctx.lineTo(p.x + r, p.y);
+      this.symbol(ctx, p.x, p.y, r, friendly, s.spec.air ? 'air' : s.submerged ? 'sub' : 'surface');
+      if (s.submerged && friendly) {
+        ctx.font = `12px ${FONT}`;
+        ctx.fillStyle = col;
+        ctx.textAlign = 'center';
+        ctx.fillText('SUB', p.x, p.y + 26);
+        ctx.textAlign = 'left';
       }
-      ctx.stroke();
       if (!s.alive) {
         ctx.beginPath();
         ctx.moveTo(p.x - r, p.y - r);
@@ -298,6 +313,37 @@ export class Overlay {
     this.drawMinimap(g);
   }
 
+  // NTDS-style symbol: friendly round, hostile angular. Surface = full,
+  // air = upper half, subsurface = lower half.
+  symbol(ctx, x, y, r, friendly, domain) {
+    ctx.beginPath();
+    if (friendly) {
+      if (domain === 'air') ctx.arc(x, y, r, Math.PI, 0);
+      else if (domain === 'sub') ctx.arc(x, y, r, 0, Math.PI);
+      else ctx.arc(x, y, r, 0, Math.PI * 2);
+    } else if (domain === 'air') {
+      ctx.moveTo(x - r, y);
+      ctx.lineTo(x, y - r);
+      ctx.lineTo(x + r, y);
+    } else if (domain === 'sub') {
+      ctx.moveTo(x - r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x + r, y);
+    } else {
+      ctx.moveTo(x - r, y);
+      ctx.lineTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.closePath();
+    }
+    ctx.stroke();
+  }
+
+  sonarPing(ship, r) {
+    if (this.radarPings.length > 24) this.radarPings.shift();
+    this.radarPings.push({ id: ship.id, r, t: 0, sonar: true });
+  }
+
   // Control point and shipping lane, drawn on the sea.
   drawMapLayer(g) {
     const map = g.state.map;
@@ -356,13 +402,15 @@ export class Overlay {
       rp.t += dt;
       const s = g.shipById(rp.id);
       if (!s) continue;
-      const k = Math.min(1, rp.t / 0.9);
+      const dur = rp.sonar ? 1.8 : 0.9;
+      const k = Math.min(1, rp.t / dur);
       const a = (1 - k) * (rp.blind ? 0.6 : 0.35);
       if (a <= 0.01) continue;
       ctx.lineWidth = 1.5;
-      this.groundCircle(s.x, s.z, rp.r * (rp.blind ? 0.25 : Math.sqrt(k)), rp.blind ? `rgba(185,140,255,${a})` : `rgba(140,255,170,${a})`, []);
+      const colr = rp.sonar ? `rgba(110,200,255,${a * 1.6})` : rp.blind ? `rgba(185,140,255,${a})` : `rgba(140,255,170,${a})`;
+      this.groundCircle(s.x, s.z, rp.r * (rp.blind ? 0.25 : Math.sqrt(k)), colr, rp.sonar ? [6, 4] : []);
     }
-    this.radarPings = this.radarPings.filter((p) => p.t < 0.9);
+    this.radarPings = this.radarPings.filter((p) => p.t < (p.sonar ? 1.8 : 0.9));
     ctx.lineWidth = 1;
   }
 
@@ -486,14 +534,15 @@ export class Overlay {
   // Screen position of a ship's symbol. When zoomed in, float it above the
   // mast instead of drawing over the hull. `len` is the hull's screen size.
   marker(s) {
-    const p = this.project(s.x, 8, s.z);
+    const y0 = s.spec && s.spec.air ? s.alt : 8;
+    const p = this.project(s.x, y0, s.z);
     if (!p.ok) return p;
     const len = s.spec ? s.spec.len : CLASSES[s.cls].len;
     const hx = Math.sin(s.heading) * len * 0.5;
     const hz = Math.cos(s.heading) * len * 0.5;
-    const bow = this.project(s.x + hx, 8, s.z + hz);
-    const stern = this.project(s.x - hx, 8, s.z - hz);
-    const top = this.project(s.x, len * 0.45, s.z);
+    const bow = this.project(s.x + hx, y0, s.z + hz);
+    const stern = this.project(s.x - hx, y0, s.z - hz);
+    const top = this.project(s.x, y0 + len * 0.45, s.z);
     p.len = Math.max(Math.hypot(bow.x - stern.x, bow.y - stern.y), p.y - top.y);
     p.hullX = p.x;
     p.hullY = p.y;
@@ -744,14 +793,7 @@ export class Overlay {
       ctx.strokeStyle = friendly ? FRIEND : HOSTILE;
       ctx.fillStyle = ctx.strokeStyle;
       ctx.lineWidth = g.selected.has(s.id) ? 2 : 1.2;
-      ctx.beginPath();
-      if (friendly) ctx.arc(px, py, 4, Math.PI, 0);
-      else {
-        ctx.moveTo(px - 4, py);
-        ctx.lineTo(px, py - 4);
-        ctx.lineTo(px + 4, py);
-      }
-      ctx.stroke();
+      this.symbol(ctx, px, py, 4, friendly, s.spec.air ? 'air' : s.submerged ? 'sub' : 'surface');
       const [hx, hy] = P(s.x + (Math.sin(s.heading) * 7) / v.scale, s.z + (Math.cos(s.heading) * 7) / v.scale);
       ctx.beginPath();
       ctx.moveTo(px, py);

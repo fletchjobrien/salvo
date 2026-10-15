@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CLASSES, SPEED_LEVELS, SENSORS, MISSILE_TYPES } from './config.js';
-import { World, radarRange, jammedAt, isCombatant } from './sim/world.js';
+import { World, radarRange, jammedAt, isCombatant, isAir, weaponRange } from './sim/world.js';
 import { AIController } from './sim/ai.js';
 import { Renderer } from './render/renderer.js';
 import { ENVIRONMENTS } from './render/env.js';
@@ -201,7 +201,7 @@ class Game {
     const f = this.prefs.fleet;
     const counts = {};
     for (const d of f.ships) counts[d.cls] = (counts[d.cls] || 0) + 1;
-    const names = { ddg: 'DDG', ffg: 'FFG', fac: 'FAC' };
+    const names = { ddg: 'DDG', ffg: 'FFG', fac: 'FAC', ssk: 'SSK' };
     const parts = Object.entries(counts).map(([c, n]) => `${n}×${names[c]}`);
     $('fleet-summary').innerHTML = `YOUR FLEET: <b>${parts.join(' ')}</b><br>${fleetCost(f)} / ${BUDGET} pts`;
   }
@@ -404,7 +404,7 @@ class Game {
 
   toggleFireMode() {
     this.jamMode = false;
-    const ids = this.liveSelected().filter((id) => this.shipById(id).ssm > 0);
+    const ids = this.liveSelected().filter((id) => this.shipById(id).ssm + (this.shipById(id).torps || 0) > 0);
     if (!ids.length) {
       this.audio.deny();
       this.hud.message('No missiles remaining in selected ships.', 'warn');
@@ -419,12 +419,12 @@ class Game {
     const ids = this.liveSelected();
     const c = this.contactPos(target);
     if (!c) return;
-    const reach = (s) => Object.entries(s.ammo || {}).some(([k, n]) => n > 0 && Math.hypot(s.x - c.x, s.z - c.z) < MISSILE_TYPES[k].range);
+    const reach = (s) => Object.entries(s.ammo || {}).some(([k, n]) => n > 0 && Math.hypot(s.x - c.x, s.z - c.z) < weaponRange(k) && (!target.submerged || !MISSILE_TYPES[k]));
     const shooters = ids.map((id) => this.shipById(id)).filter(reach);
     if (!shooters.length) {
       this.audio.deny();
-      const any = ids.some((id) => this.shipById(id).ssm > 0);
-      this.hud.message(any ? 'Target out of missile range.' : 'No missiles remaining.', 'warn');
+      const any = ids.some((id) => this.shipById(id).ssm + (this.shipById(id).torps || 0) > 0);
+      this.hud.message(target.submerged ? 'Submerged target: needs torpedoes in range.' : any ? 'Target out of range.' : 'No missiles or torpedoes left.', 'warn');
       return;
     }
     this.issue({ type: 'fire', ships: shooters.map((s) => s.id), target: target.id, count: this.salvo });
@@ -480,6 +480,30 @@ class Game {
     this.audio.jamToggle(true);
   }
 
+  // Submarines: U toggles dive / surface.
+  toggleDive() {
+    const subs = this.liveSelected()
+      .map((id) => this.shipById(id))
+      .filter((s) => s.spec.sub);
+    if (!subs.length) return this.audio.deny();
+    const on = !subs.every((s) => s.submerged);
+    this.issue({ type: 'dive', ships: subs.map((s) => s.id), on });
+    this.audio.order();
+  }
+
+  // Active sonar ping (P): finds subs nearby, but everyone hears you.
+  sonarPing() {
+    const ids = this.liveSelected().filter((id) => {
+      const s = this.shipById(id);
+      return s.spec.sonar && s.spec.sonar.active && !(s.sonarCd > 0) && !isAir(s);
+    });
+    if (!ids.length) {
+      this.hud.message('No sonar ready on the selected ships.', 'warn');
+      return this.audio.deny();
+    }
+    this.issue({ type: 'sonar', ships: ids });
+  }
+
   // What we know about a ship: exact for our own, the plotted contact otherwise.
   contactPos(s) {
     if (s.side === this.side || this.mode === 'menu') return { x: s.x, z: s.z, level: 1, age: 0 };
@@ -504,6 +528,7 @@ class Game {
   // ------------------------------------------------------------ queries
   missileVisible(m) {
     if (m.side === this.side) return true;
+    if (m.kind === 'torp') return this.state.ships.some((s) => s.side === this.side && s.alive && !isAir(s) && Math.hypot(m.x - s.x, m.z - s.z) < 2200);
     for (const s of this.state.ships) {
       if (s.side !== this.side || !s.alive) continue;
       const blind = !s.radar || jammedAt(this.state.jams, this.side, s.x, s.z);
@@ -801,6 +826,8 @@ class Game {
     else if (k === 'KeyG') this.chaff();
     else if (k === 'KeyB') this.toggleRadar();
     else if (k === 'KeyJ') this.toggleJamMode();
+    else if (k === 'KeyU') this.toggleDive();
+    else if (k === 'KeyP') this.sonarPing();
     else if (k === 'KeyZ') this.setSalvo(2);
     else if (k === 'KeyX') this.setSalvo(4);
     else if (k === 'KeyC') this.setSalvo(6);
@@ -869,6 +896,7 @@ class Game {
           if (e.k === 'ssm' && mine) {
             this.hud.message(`${s.name.toUpperCase()}: bird away`, 'friend');
           }
+          if (e.k === 'torp' && mine) this.hud.message(`${s.name.toUpperCase()}: torpedo in the water`, 'friend');
           if (shipVisible || mine) this.audio.launch(e.x, e.y, e.z, e.k);
           break;
         case 'gun':
@@ -989,6 +1017,26 @@ class Game {
         case 'laser':
           this.audio.laser(e.x, e.y, e.z);
           break;
+        case 'sonar':
+          if (e.side === me && s) {
+            this.overlay.sonarPing(s, e.r);
+            this.audio.sonar(e.x, 0, e.z);
+          } else if (this.state.ships.some((q) => q.side === me && q.alive && Math.hypot(q.x - e.x, q.z - e.z) < e.r * 2)) {
+            this.audio.sonar(e.x, 0, e.z, true);
+            if (this.audio.can('sonarheard', 6)) this.hud.message('Enemy sonar ping heard!', 'warn');
+          }
+          break;
+        case 'dive':
+          if (mine) this.hud.message(`${s.name.toUpperCase()}: ${e.on ? 'diving — hidden from radar' : 'surfacing'}`, 'friend');
+          this.audio.splash(e.x, 0, e.z, 2);
+          break;
+        case 'shotdown':
+          this.audio.explosion(e.x, e.y, e.z, 0.6);
+          if (s && s.side === me) {
+            this.hud.message(`${s.name.toUpperCase()} SHOT DOWN`, 'enemy');
+            this.audio.say('Aircraft down!');
+          } else if (s) this.hud.message(`Enemy ${CLASSES[s.cls].label.toLowerCase()} shot down`, 'good');
+          break;
         case 'system':
           if (mine) this.hud.message(`${s.name.toUpperCase()}: ${{ radar: 'radar damaged', engine: 'engine room damaged', gun: 'main gun out of action' }[e.sys]}`, 'warn');
           break;
@@ -1010,11 +1058,18 @@ class Game {
 
   checkVampires() {
     let fresh = 0;
+    let torps = 0;
     for (const m of this.state.missiles) {
-      if (m.kind !== 'ssm' || m.side === this.side || this.seenVampires.has(m.id)) continue;
+      if (m.kind === 'sam' || m.side === this.side || this.seenVampires.has(m.id)) continue;
       if (!this.missileVisible(m)) continue;
       this.seenVampires.add(m.id);
-      fresh++;
+      if (m.kind === 'torp') torps++;
+      else fresh++;
+    }
+    if (torps) {
+      this.audio.alarm();
+      this.audio.say('Torpedo in the water!', true);
+      this.hud.message(`TORPEDO ×${torps} — inbound!`, 'enemy');
     }
     if (fresh) {
       this.audio.alarm();

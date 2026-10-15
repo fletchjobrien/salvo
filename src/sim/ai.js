@@ -1,6 +1,5 @@
 // Enemy commander. Uses the same command API as a human player.
-import { MISSILE_TYPES } from '../config.js';
-import { enemyOf } from './world.js';
+import { enemyOf, isAir, weaponRange } from './world.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
@@ -30,15 +29,24 @@ export class AIController {
     this.thinkT = 1;
 
     const w = this.world;
-    const mine = w.ships.filter((s) => s.side === this.side && s.alive);
+    const all = w.ships.filter((s) => s.side === this.side && s.alive);
+    const mine = all.filter((s) => !isAir(s));
+    const air = all.filter((s) => isAir(s));
     if (!mine.length) return;
     const ids = mine.map((s) => s.id);
+    // Sonar: ping now and then to flush out submarines.
+    this.sonarT = (this.sonarT ?? rand(15, 30)) - 1;
+    if (this.sonarT <= 0) {
+      const pinger = mine.find((s) => s.spec.sonar && s.spec.sonar.active && s.sonarCd <= 0 && !s.spec.sub);
+      if (pinger) this.cmd({ type: 'sonar', ships: [pinger.id] });
+      this.sonarT = rand(25, 40);
+    }
     const foe = enemyOf(this.side);
     // Only shoot at what we have identified: unknown blips may be freighters.
     const enemies = [];
     for (const c of w.contacts[this.side].values()) {
       const s = w.byId.get(c.id);
-      if (s && s.alive && s.side === foe && c.level > 0) enemies.push({ ship: s, x: c.x, z: c.z });
+      if (s && s.alive && s.side === foe && c.level > 0 && !isAir(s)) enemies.push({ ship: s, x: c.x, z: c.z });
     }
     const cx = mine.reduce((a, s) => a + s.x, 0) / mine.length;
     const cz = mine.reduce((a, s) => a + s.z, 0) / mine.length;
@@ -47,6 +55,9 @@ export class AIController {
     if (!enemies.length) {
       if (this.moveT <= 0) {
         this.moveT = 10;
+        // Drones scout ahead toward the point.
+        const drones = air.filter((a) => a.cls !== 'helo');
+        if (drones.length) this.cmd({ type: 'move', ships: drones.map((a) => a.id), x: cp.x - (cx - cp.x) * 0.6, z: cp.z - (cz - cp.z) * 0.6 });
         // Take the control point and hold it.
         const a = Math.atan2(cx - cp.x, cz - cp.z);
         this.cmd({ type: 'move', ships: ids, x: cp.x + Math.sin(a) * cp.r * 0.4, z: cp.z + Math.cos(a) * cp.r * 0.4 });
@@ -75,9 +86,9 @@ export class AIController {
     // Missile salvo, with a jammer cast ahead of it to blind their SAM radars.
     const inFlight = w.missiles.some((m) => m.kind === 'ssm' && m.side === this.side && m.contact === target.ship.id);
     if (this.salvoT <= 0 && !inFlight) {
-      const shooters = mine.filter((s) => {
+      const shooters = all.filter((s) => {
         const d = Math.hypot(s.x - target.x, s.z - target.z);
-        return Object.entries(s.ammo).some(([k, n]) => n > 0 && d < MISSILE_TYPES[k].range * 0.95);
+        return Object.entries(s.ammo).some(([k, n]) => n > 0 && d < weaponRange(k) * 0.95 && (k === 'light' || k === 'heavy') === !!target.ship.submerged);
       });
       if (shooters.length) {
         const size = { fac: 2, ffg: 3, ddg: 4 }[target.ship.cls] + (this.difficulty > 1 ? 1 : 0);
@@ -107,6 +118,9 @@ export class AIController {
       }
       this.cmd({ type: 'move', ships: ids, x: tx, z: tz });
       this.cmd({ type: 'speed', ships: ids, level: 3 });
+      // strike drones close with the target; recon drones keep it in view
+      const drones = air.filter((a) => a.cls !== 'helo');
+      if (drones.length) this.cmd({ type: 'move', ships: drones.map((a) => a.id), x: (target.x + cx) / 2, z: (target.z + cz) / 2 });
     }
   }
 
@@ -114,9 +128,9 @@ export class AIController {
   updateDefence(dt) {
     const w = this.world;
     for (const s of w.ships) {
-      if (s.side !== this.side || !s.alive) continue;
+      if (s.side !== this.side || !s.alive || isAir(s)) continue;
       const threats = w.missiles.filter(
-        (m) => m.kind === 'ssm' && m.side !== this.side && m.alive && Math.hypot(m.x - s.x, m.z - s.z) < 2500 && (!m.locked || m.targetId === s.id),
+        (m) => m.kind !== 'sam' && m.side !== this.side && m.alive && Math.hypot(m.x - s.x, m.z - s.z) < 2500 && (!m.locked || m.targetId === s.id),
       );
       if (!threats.length) {
         this.chaffReact.delete(s.id);
@@ -129,7 +143,7 @@ export class AIController {
       }
       this.chaffReact.set(s.id, 3);
       const m = threats[0];
-      if (s.spec.canJam && s.jamCd <= 0) this.cmd({ type: 'jam', ships: [s.id], x: m.x, z: m.z });
+      if (s.spec.canJam && s.jamCd <= 0 && m.kind === 'ssm') this.cmd({ type: 'jam', ships: [s.id], x: m.x, z: m.z });
       else if (s.chaff > 0 && s.chaffCd <= 0 && m.locked) this.cmd({ type: 'chaff', ships: [s.id] });
     }
   }

@@ -118,6 +118,10 @@ export class Mirror {
       chaffCd: 0,
       jamCd: 0,
       radar: true,
+      submerged: !!c.sub,
+      alt: c.alt || 0,
+      sonarCd: 0,
+      torps: 0,
       civ: s.side === 'civ',
     };
     this.ships.push(ship);
@@ -185,14 +189,18 @@ export class Mirror {
       s.fires = B[12].map(([lx, lz]) => ({ lx, lz }));
       s.dmg = { radar: !!(B[13] & 1), engine: !!(B[13] & 2), gun: !!(B[13] & 4) };
       s.radar = !(B[13] & 8);
+      s.submerged = !!(B[13] & 16);
       s.target = B[14] || null;
       s.throttle = B[15];
       s.waypoints = B[16].map(([x, z]) => ({ x, z }));
       s.turn = B[17];
       s.launchQueue = new Array(B[18]).fill(0);
       s.chaffCd = B[19];
-      s.ammo = { skimmer: B[22][0], supersonic: B[22][1], cruise: B[22][2] };
+      s.ammo = { skimmer: B[22][0], supersonic: B[22][1], cruise: B[22][2], heavy: B[22][3], light: B[22][4] };
+      s.torps = (B[22][3] || 0) + (B[22][4] || 0);
       s.jamCd = B[23];
+      s.alt = lerp(A[25] || 0, B[25] || 0, t);
+      s.sonarCd = B[26] || 0;
     }
 
     const list = [];
@@ -200,7 +208,7 @@ export class Mirror {
       const A = a.missiles.get(id) || B;
       list.push({
         id,
-        kind: B[1] === 0 ? 'ssm' : 'sam',
+        kind: ['ssm', 'sam', 'torp'][B[1]],
         side: B[2] === 0 ? 'blue' : 'red',
         x: lerp(A[3], B[3], t),
         y: lerp(A[4], B[4], t),

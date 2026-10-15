@@ -365,7 +365,7 @@ export class GameView {
       const visible = s.side === viewerSide || visibleSet.has(s.id);
       const hidden = s.sinkT > 45;
       g.visible = visible && !hidden;
-      v.wake.update(s, t, dt, visible, this.camPos);
+      v.wake.update(s, t, dt, visible && !c.air && !s.submerged, this.camPos);
 
       // bobbing from the same wave field as the ocean
       const fwd = toWorld(s, 0, c.len * 0.35);
@@ -389,9 +389,20 @@ export class GameView {
         const list = (1 - s.hp / s.maxHp) * 0.06 * v.sinkSide;
         tr += list;
       }
-      v.y += (ty - v.y) * k;
+      if (c.air) {
+        // flying: altitude, bank into turns, nose down when falling
+        ty = s.alt;
+        tp = s.alive ? -0.05 : 0.6;
+        tr = -s.turn * 0.9 + (s.alive ? 0 : Math.sin(this.time * 9) * 0.6);
+      } else if (s.submerged) {
+        ty = -9;
+        tp = 0;
+        tr = 0;
+      }
+      v.y += (ty - v.y) * (c.air ? 1 : k);
       v.pitch += (tp - v.pitch) * k;
       v.roll += (tr - v.roll) * k;
+      if (v.model.rotor) v.model.rotor.rotation.y += dt * 30;
       g.position.set(s.x, 0, s.z);
       g.rotation.y = s.heading;
       v.model.body.position.y = v.y;
@@ -407,6 +418,14 @@ export class GameView {
       if (radiating) v.model.radar.rotation.y += dt * (s.dmg?.radar ? 0.6 : 2.6);
 
       if (!visible || hidden) continue;
+      if (c.air) {
+        if (!s.alive && Math.random() < dt * 30) this.fx.shipFire(s.x, s.alt, s.z, 1);
+        continue;
+      }
+      if (s.submerged) {
+        if (s.speed > 3 && Math.random() < dt * 2) this.fx.bubbles(s.x, s.z, c.len * 0.3);
+        continue;
+      }
 
       // funnel exhaust, damage fires
       const damaged = s.hp < s.maxHp * 0.5;
@@ -445,6 +464,10 @@ export class GameView {
     // missiles
     const seen = new Set();
     for (const m of state.missiles) {
+      if (m.kind === 'torp') {
+        if (Math.random() < dt * 14) this.fx.torpWake(m.x, m.z, m.heading);
+        continue;
+      }
       seen.add(m.id);
       let mv = this.missiles.get(m.id);
       if (!mv) {
@@ -487,7 +510,8 @@ export class GameView {
           this.fx.launch(e.x, e.y, e.z, e.k);
           break;
         case 'hit':
-          if (e.k === 'ssm') this.fx.explosion(e.x, e.y + 4, e.z, 1.3, true);
+          if (e.k === 'torp') this.fx.torpedoHit(e.x, e.z);
+          else if (e.k === 'ssm') this.fx.explosion(e.x, e.y + 4, e.z, 1.3, true);
           else this.fx.shellHit(e.x, e.y + 2, e.z);
           break;
         case 'splash':
@@ -526,6 +550,16 @@ export class GameView {
           this.fx.chaff(e.x, e.z, s ? s.x : e.x, s ? s.z : e.z);
           break;
         }
+        case 'shotdown':
+          this.fx.explosion(e.x, e.y, e.z, 0.7, false);
+          break;
+        case 'dive':
+          this.fx.waterColumn(e.x, e.z, 0.5);
+          this.fx.ring(e.x, e.z, 60, 1.5, 0.4);
+          break;
+        case 'sonar':
+          this.fx.ring(e.x, e.z, 90, 1.2, 0.5, 0x80e0ff);
+          break;
         case 'sink': {
           this.fx.sinkBlast(e.x, e.z);
           for (let i = 1; i <= 3; i++) {

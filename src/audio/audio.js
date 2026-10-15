@@ -338,6 +338,28 @@ export class Audio {
     this.blip(220, 0.12, 'sawtooth', 0.1);
   }
 
+  // Sonar ping: the classic long, ringing sine. Distant (enemy) pings are
+  // thinner and quieter.
+  sonar(x, y, z, distant = false) {
+    if (!this.can('sonar' + distant, 0.5)) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(distant ? 3100 : 1650, t);
+    o.frequency.exponentialRampToValueAtTime(distant ? 3000 : 1600, t + 1.6);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(distant ? 0.05 : 0.22, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (distant ? 1 : 2.2));
+    o.connect(g).connect(this.master);
+    const r = ctx.createGain();
+    r.gain.value = 0.6;
+    g.connect(r).connect(this.reverbSend);
+    o.start(t);
+    o.stop(t + 2.3);
+  }
+
   // Laser: a short rising electric whine.
   laser(x, y, z) {
     if (!this.can('laser', 0.25)) return;

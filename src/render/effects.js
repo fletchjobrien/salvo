@@ -562,6 +562,21 @@ export class Effects {
     }
   }
 
+  // Torpedo running just under the surface: a faint line of churn.
+  torpWake(x, z, h) {
+    this.smoke.emit(x + rand(-1, 1), 0.6, z + rand(-1, 1), -Math.sin(h) * 2, 0.5, -Math.cos(h) * 2, rand(1.5, 2.5), 2, 7, C(0.85, 0.92, 0.98, 0.45), C(0.85, 0.92, 0.98, 0), 1, 0);
+  }
+
+  // Underwater detonation: a huge white column and a slow boil.
+  torpedoHit(x, z) {
+    this.waterColumn(x, z, 2.2);
+    this.ring(x, z, 160, 2.2, 0.6);
+    this.fire.emit(x, 6, z, 0, 0, 0, 0.25, 40, 60, C(4, 3.5, 3, 1), C(1, 0.5, 0.2, 0));
+    for (let i = 0; i < 20; i++) this.smoke.emit(x + rand(-10, 10), 2, z + rand(-10, 10), rand(-4, 4), rand(4, 10), rand(-4, 4), rand(4, 8), 10, 50, this.smokeColor(0.15, 0.7), this.smokeColor(0.3, 0), 0.5, -1);
+    this.flash(x, 10, z, 0xffd0a0, 40, 400, 0.6);
+    this.addShake(x, 0, z, 1.6);
+  }
+
   // Electronic warfare: crackling violet sparks.
   jamSpark(x, y, z, k = 1) {
     for (let i = 0; i < 3 * k; i++) {

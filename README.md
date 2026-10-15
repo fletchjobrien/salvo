@@ -15,6 +15,8 @@ The game runs fully in the browser (Three.js + WebAudio). A Cloudflare Worker se
 | **G** | Fire chaff decoys at incoming missiles |
 | **B** | Radar on / off |
 | **J**, then click | Cast a jamming cone |
+| **P** | Active sonar ping |
+| **U** | Submarine: dive / surface |
 | `[` `]` or R / V, Backspace | Speed down / up, all stop |
 | 1–4, `` ` `` | Select a ship / the whole fleet (double-tap to jump the camera) |
 | H, double-click, Tab | Follow a ship |
@@ -37,6 +39,9 @@ Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ship
 - **Defence:** SAM battery, CIWS, point-defence laser, decoy launcher.
 - **Radar arrays:** search (5.2 km), early-warning (8 km, slow pings), fire-control (3.6 km, fast pings, identifies everything).
 - **Jammer arrays:** noise jammer (narrow, 7 km), barrage jammer (wide, 4 km).
+- **Submarine** hull (170 pts, 3 slots): torpedo tubes, missile batteries, decoys. Built-in sonar.
+- **Undersea:** ASW torpedoes (homing, for hunting subs) and a sonar array for surface ships.
+- **Aircraft** (frigate/destroyer decks): ASW helicopter (dips sonar, drops torpedoes on subs), recon drone (fast flying radar), strike drone (2 sea-skimmers).
 - **ENEMY** on the menu picks the AI fleet: Standard, Random, or Mirror (your own design). In multiplayer each player brings their own fleet.
 
 ### Radar and jamming
@@ -44,6 +49,9 @@ Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ship
 - Radar **pings** on a timer and shows its range. Contacts in range appear as amber **unknown** blips; close contacts are **identified**. Every ship has a short navigation radar.
 - A ship with its radar on can be seen by enemies near it. Turn radar off (B) to hide — but you are blind and your SAMs stop working.
 - Missiles fly to the contact and lock the ship nearest their aim point — which may be a freighter.
+- **Sonar:** passive sonar hears units by their noise — fast ships are loud, submerged subs are quiet — and gives an estimated position. An active ping (P) reveals everything nearby exactly but gives you away.
+- **Submarines** are invisible to radar while submerged (U to surface/dive). Torpedoes run underwater: SAMs and CIWS can't stop them, decoys can.
+- **Aircraft** can be selected and ordered like ships; with no orders they orbit their carrier. Helicopters hover to dip sonar and attack submarines automatically.
 - **Jamming** is cast (J, then click): a cone that blinds enemy radars, SAMs and missile seekers inside it for a few seconds, then recharges.
 
 ## Develop

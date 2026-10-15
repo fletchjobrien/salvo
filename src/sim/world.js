@@ -6,6 +6,7 @@ import {
   CLASSES,
   MISSILE_TYPES,
   MISSILE_PREFERENCE,
+  TORPEDO_TYPES,
   WEAPONS,
   WORLD,
   SPEED_LEVELS,
@@ -28,6 +29,11 @@ export const isCombatant = (s) => s.side === 'blue' || s.side === 'red';
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (a, b) => a + Math.random() * (b - a);
 const SIDE_CODE = { blue: 0, red: 1, civ: 2 };
+export const isAir = (s) => !!(s.spec && s.spec.air);
+// Range of any weapon type (missile or torpedo).
+export const weaponRange = (type) => (MISSILE_TYPES[type] || TORPEDO_TYPES[type] || { range: 0 }).range;
+const MISSILE_KEYS = Object.keys(MISSILE_TYPES);
+const TORP_KEYS = Object.keys(TORPEDO_TYPES);
 
 // Convert a world offset into a ship's local frame (lz = forward, lx = right).
 export function toLocal(ship, x, z) {
@@ -99,13 +105,19 @@ export class World {
       const baseX = rand(-500, 500);
       const baseZ = -dir * half;
       // biggest hull leads the formation
-      const order = { ddg: 0, ffg: 1, fac: 2 };
+      const order = { ddg: 0, ffg: 1, fac: 2, ssk: 3 };
       const ships = fleet.ships.slice().sort((a, b) => order[a.cls] - order[b.cls]);
       ships.forEach((def, i) => {
         const [ox, oz] = FORMATION[i % FORMATION.length];
         const s = Math.sin(heading);
         const c = Math.cos(heading);
-        w.spawnShip(side, def, baseX + ox * c + oz * s, baseZ - ox * s + oz * c, heading);
+        const ship = w.spawnShip(side, def, baseX + ox * c + oz * s, baseZ - ox * s + oz * c, heading);
+        // aircraft take off from their deck
+        ship.spec.aircraft.forEach((cls, k) => {
+          const a = w.spawnShip(side, { cls, modules: [], name: `${ship.name} ${CLASSES[cls].short}${ship.spec.aircraft.length > 1 ? ' ' + (k + 1) : ''}`, hull: CLASSES[cls].short }, ship.x, ship.z, heading);
+          a.carrier = ship.id;
+          a.orbit = (k + 1) * 1.9;
+        });
       });
     }
     // a few freighters already under way
@@ -152,11 +164,20 @@ export class World {
       fires: [],
       dmg: { radar: false, engine: false, gun: false },
       radar: true,
+      submerged: !!c.sub,
+      sonarCd: rand(2, 6),
+      alt: c.alt || 0,
+      carrier: 0,
     };
-    s.ssm = Object.values(s.ammo).reduce((a, b) => a + b, 0);
+    this.countAmmo(s);
     this.ships.push(s);
     this.byId.set(s.id, s);
     return s;
+  }
+
+  countAmmo(s) {
+    s.ssm = MISSILE_KEYS.reduce((a, k) => a + (s.ammo[k] || 0), 0);
+    s.torps = TORP_KEYS.reduce((a, k) => a + (s.ammo[k] || 0), 0);
   }
 
   // A freighter on the shipping lane. t: 0..1 along the lane; dir: +1 a->b.
@@ -215,7 +236,9 @@ export class World {
           const ref = cmd.append && s.waypoints.length ? s.waypoints[s.waypoints.length - 1] : s;
           const ox = ships.length > 1 ? (ref.x - cx) * scale : 0;
           const oz = ships.length > 1 ? (ref.z - cz) * scale : 0;
-          const wp = this.clearOfLand(clamp(cmd.x + ox, -WORLD.radius, WORLD.radius), clamp(cmd.z + oz, -WORLD.radius, WORLD.radius), s.spec.len);
+          const cx2 = clamp(cmd.x + ox, -WORLD.radius, WORLD.radius);
+          const cz2 = clamp(cmd.z + oz, -WORLD.radius, WORLD.radius);
+          const wp = isAir(s) ? { x: cx2, z: cz2 } : this.clearOfLand(cx2, cz2, s.spec.len);
           if (cmd.append) s.waypoints.push(wp);
           else s.waypoints = [wp];
           if (s.waypoints.length > 8) s.waypoints.shift();
@@ -253,7 +276,7 @@ export class World {
           let any = false;
           for (const s of shooters) {
             if (count <= 0) break;
-            const type = this.pickMissile(s, Math.hypot(s.x - c.x, s.z - c.z));
+            const type = this.pickWeapon(s, Math.hypot(s.x - c.x, s.z - c.z), t);
             if (type) {
               s.launchQueue.push({ tid: t.id, type });
               count--;
@@ -268,6 +291,16 @@ export class World {
         for (const s of ships) this.castJam(s, cmd.x, cmd.z);
         break;
       }
+      case 'sonar':
+        for (const s of ships) this.activePing(s);
+        break;
+      case 'dive':
+        for (const s of ships) {
+          if (!s.spec.sub || s.submerged === !!cmd.on) continue;
+          s.submerged = !!cmd.on;
+          this.emit({ t: 'dive', s: s.id, on: s.submerged, x: s.x, z: s.z });
+        }
+        break;
       case 'chaff':
         for (const s of ships) this.deployChaff(s);
         break;
@@ -283,13 +316,35 @@ export class World {
     }
   }
 
-  // First missile type (by preference) with ammo left that reaches `dist`.
-  pickMissile(s, dist) {
-    for (const type of MISSILE_PREFERENCE) {
+  // Best weapon with ammo left that reaches `dist`: torpedoes for submerged
+  // subs, missiles (then heavy torpedoes) for everything on the surface.
+  pickWeapon(s, dist, t) {
+    if (isAir(t)) return null;
+    const order = t.submerged ? ['light', 'heavy'] : [...MISSILE_PREFERENCE, 'heavy'];
+    for (const type of order) {
       const queued = s.launchQueue.filter((q) => q.type === type).length;
-      if (s.ammo[type] - queued > 0 && dist < MISSILE_TYPES[type].range) return type;
+      if ((s.ammo[type] || 0) - queued > 0 && dist < weaponRange(type)) return type;
     }
     return null;
+  }
+
+  // Active sonar: everything underwater or on the surface nearby is found
+  // exactly, but every enemy within twice the range hears the ping.
+  activePing(s) {
+    const sn = s.spec.sonar;
+    if (!s.alive || !sn || !sn.active || s.sonarCd > 0) return false;
+    s.sonarCd = sn.cooldown;
+    this.emit({ t: 'sonar', s: s.id, side: s.side, r: sn.active, x: s.x, z: s.z });
+    for (const e of this.ships) {
+      if (e.side === s.side || !e.alive || isAir(e)) continue;
+      const d = Math.hypot(e.x - s.x, e.z - s.z);
+      if (d < sn.active && !lineBlocked(this.map, s.x, s.z, e.x, e.z)) this.upsert(s.side, e, 1);
+    }
+    for (const side of ['blue', 'red']) {
+      if (side === s.side) continue;
+      if (this.ships.some((e) => e.side === side && e.alive && Math.hypot(e.x - s.x, e.z - s.z) < sn.active * 2)) this.upsert(side, s, 0);
+    }
+    return true;
   }
 
   // Push a point out of any island.
@@ -328,7 +383,7 @@ export class World {
     this.decoys.push(d);
     this.emit({ t: 'chaff', s: s.id, x: p.x, z: p.z });
     for (const m of this.missiles) {
-      if (m.kind !== 'ssm' || !m.alive || !m.locked || m.targetId !== s.id || m.decoy) continue;
+      if ((m.kind !== 'ssm' && m.kind !== 'torp') || !m.alive || !m.locked || m.targetId !== s.id || m.decoy) continue;
       if (Math.hypot(m.x - s.x, m.z - s.z) > WEAPONS.chaff.radius) continue;
       if (Math.random() < WEAPONS.chaff.seduce) m.decoy = d.id;
     }
@@ -356,6 +411,7 @@ export class World {
     this.separateShips(dt);
     for (const m of this.missiles) {
       if (m.kind === 'ssm') this.stepSSM(m, dt);
+      else if (m.kind === 'torp') this.stepTorp(m, dt);
       else this.stepSAM(m, dt);
     }
     this.missiles = this.missiles.filter((m) => m.alive);
@@ -378,16 +434,21 @@ export class World {
       this.civDir = -this.civDir;
       if (this.ships.filter((s) => s.civ && s.alive).length < 6) this.spawnCivilian(this.civDir > 0 ? 0.02 : 0.98, this.civDir);
     }
+    // downed aircraft vanish once they hit the water
+    if (this.ships.some((s) => isAir(s) && !s.alive && s.sinkT > 6)) {
+      for (const s of this.ships) if (isAir(s) && !s.alive && s.sinkT > 6) this.byId.delete(s.id);
+      this.ships = this.ships.filter((s) => this.byId.has(s.id));
+    }
 
     this.stepControl(dt);
 
     if (!this.winner) {
-      const blueAlive = this.ships.some((s) => s.side === 'blue' && s.alive);
-      const redAlive = this.ships.some((s) => s.side === 'red' && s.alive);
+      const blueAlive = this.ships.some((s) => s.side === 'blue' && s.alive && !isAir(s));
+      const redAlive = this.ships.some((s) => s.side === 'red' && s.alive && !isAir(s));
       // Neither side can hurt the other any more and the point is idle: draw.
       const armed = (side) =>
-        this.ships.some((s) => s.side === side && s.alive && (s.ssm > 0 || s.launchQueue.length || (s.spec.guns.length && !s.dmg.gun)));
-      const stalemate = !armed('blue') && !armed('red') && !this.missiles.some((m) => m.kind === 'ssm') && !this.shells.length && !this.cp.owner;
+        this.ships.some((s) => s.side === side && s.alive && (s.ssm > 0 || s.torps > 0 || s.launchQueue.length || (s.spec.guns.length && !s.dmg.gun)));
+      const stalemate = !armed('blue') && !armed('red') && !this.missiles.some((m) => m.kind !== 'sam') && !this.shells.length && !this.cp.owner;
       let winner = null;
       if (!blueAlive || !redAlive) winner = blueAlive ? 'blue' : redAlive ? 'red' : 'draw';
       else if (this.cp.score.blue >= CONTROL.win) winner = 'blue';
@@ -401,16 +462,21 @@ export class World {
   }
 
   // ---------------------------------------------------------------- sensors
-  upsert(side, e, level) {
+  // pos: an estimated position (passive sonar); default is the true one.
+  upsert(side, e, level, pos = null) {
     const C = this.contacts[side];
     const c = C.get(e.id);
+    const x = pos ? pos.x : e.x;
+    const z = pos ? pos.z : e.z;
     if (!c) {
-      C.set(e.id, { id: e.id, x: e.x, z: e.z, level, t: this.time });
+      C.set(e.id, { id: e.id, x, z, level, t: this.time });
       this.emit({ t: 'contact', side, s: e.id, level });
       if (level > 0) this.emit({ t: 'ident', side, s: e.id });
     } else {
-      c.x = e.x;
-      c.z = e.z;
+      // don't let a fuzzy sonar estimate overwrite a fresh exact track
+      if (pos && c.level > level && this.time - c.t < 3) return;
+      c.x = x;
+      c.z = z;
       c.t = this.time;
       if (level > c.level) {
         c.level = level;
@@ -424,7 +490,7 @@ export class World {
       const own = this.ships.filter((f) => f.side === side && f.alive);
       const C = this.contacts[side];
       for (const e of this.ships) {
-        if (e.side === side || !e.alive) continue;
+        if (e.side === side || !e.alive || e.submerged) continue;
         let seen = false;
         for (const f of own) {
           const d = Math.hypot(e.x - f.x, e.z - f.z);
@@ -436,7 +502,7 @@ export class World {
           }
         }
         // a radiating radar gives itself away
-        if (!seen && e.radar && own.some((f) => Math.hypot(e.x - f.x, e.z - f.z) < radarRange(e) * SENSORS.counter)) {
+        if (!seen && e.radar && !e.submerged && own.some((f) => Math.hypot(e.x - f.x, e.z - f.z) < radarRange(e) * SENSORS.counter)) {
           this.upsert(side, e, 0);
         }
       }
@@ -448,7 +514,7 @@ export class World {
       }
       // radar pings
       for (const f of own) {
-        if (!f.radar) continue;
+        if (!f.radar || f.submerged) continue;
         const blind = jammedAt(this.jams, side, f.x, f.z);
         f.spec.radars.forEach((r, i) => {
           f.radarT[i] -= dt;
@@ -458,12 +524,13 @@ export class World {
           this.emit({ t: 'ping', s: f.id, side, r: range, blind });
           if (blind) return;
           for (const e of this.ships) {
-            if (e.side === side || !e.alive) continue;
+            if (e.side === side || !e.alive || e.submerged) continue;
             const d = Math.hypot(e.x - f.x, e.z - f.z);
             if (d < range && !lineBlocked(this.map, f.x, f.z, e.x, e.z)) this.upsert(side, e, d < range * r.ident ? 1 : 0);
           }
         });
       }
+      this.passiveSonar(side, own, dt);
       // stale contacts fade off the plot
       for (const [id, c] of C) {
         const e = this.byId.get(id);
@@ -473,10 +540,41 @@ export class World {
     }
   }
 
+  // Passive sonar: hear units by their noise (louder when fast; submerged
+  // subs are very quiet). Gives a drifting estimated position.
+  passiveSonar(side, own, dt) {
+    this.sonarTick = this.sonarTick || { blue: 0, red: 0 };
+    this.sonarTick[side] -= dt;
+    if (this.sonarTick[side] > 0) return;
+    this.sonarTick[side] = 1;
+    const listeners = own.filter((f) => f.spec.sonar && f.spec.sonar.passive > 0 && !isAir(f));
+    if (!listeners.length) return;
+    for (const e of this.ships) {
+      if (e.side === side || !e.alive || isAir(e)) continue;
+      const noise = e.spec.noise * (0.3 + 0.7 * Math.min(1, e.speed / e.spec.maxSpeed)) * (e.submerged ? 0.7 : 1);
+      let best = Infinity;
+      let ident = false;
+      for (const f of listeners) {
+        const self = f.speed > f.spec.maxSpeed * 0.65 ? 0.6 : 1; // own flow noise deafens you
+        const range = f.spec.sonar.passive * noise * self;
+        const d = Math.hypot(e.x - f.x, e.z - f.z);
+        if (d < range && !lineBlocked(this.map, f.x, f.z, e.x, e.z)) {
+          best = Math.min(best, d);
+          if (d < range * f.spec.sonar.ident) ident = true;
+        }
+      }
+      if (best === Infinity) continue;
+      const err = best * 0.1;
+      const a = Math.sin(this.time * 0.13 + e.id * 1.7) * Math.PI;
+      const m = (0.4 + 0.4 * Math.sin(this.time * 0.09 + e.id)) * err;
+      this.upsert(side, e, ident ? 1 : 0, { x: e.x + Math.cos(a) * m, z: e.z + Math.sin(a) * m });
+    }
+  }
+
   // ---------------------------------------------------------------- control point
   stepControl(dt) {
     const cp = this.cp;
-    const inside = (side) => this.ships.some((s) => s.side === side && s.alive && Math.hypot(s.x - cp.x, s.z - cp.z) < cp.r);
+    const inside = (side) => this.ships.some((s) => s.side === side && s.alive && !isAir(s) && !s.submerged && Math.hypot(s.x - cp.x, s.z - cp.z) < cp.r);
     const b = inside('blue');
     const r = inside('red');
     cp.contested = b && r;
@@ -497,6 +595,7 @@ export class World {
   // ---------------------------------------------------------------- ships
   stepShip(s, dt) {
     const c = s.spec;
+    if (c.air) return this.stepAircraft(s, dt);
     if (!s.alive) {
       s.sinkT += dt;
       s.speed = Math.max(0, s.speed - dt * 1.5);
@@ -568,6 +667,7 @@ export class World {
     s.laserCd -= dt;
     s.chaffCd -= dt;
     s.jamCd = Math.max(0, s.jamCd - dt);
+    s.sonarCd -= dt;
     for (let i = 0; i < s.gunCd.length; i++) s.gunCd[i] -= dt;
 
     // --- fires / damage control
@@ -587,6 +687,85 @@ export class World {
     this.stepLaunches(s, c);
     this.stepGuns(s, c, dt);
     this.stepAirDefense(s, c, dt);
+  }
+
+  // Aircraft: fly to orders, otherwise orbit their carrier. Helicopters
+  // hover to dip sonar and drop torpedoes on submarines they find.
+  stepAircraft(s, dt) {
+    const c = s.spec;
+    if (!s.alive) {
+      s.sinkT += dt;
+      s.alt = Math.max(0, s.alt - dt * 45);
+      s.x += Math.sin(s.heading) * s.speed * dt;
+      s.z += Math.cos(s.heading) * s.speed * dt;
+      if (s.alt <= 0 && !s.splashed) {
+        s.splashed = true;
+        this.emit({ t: 'splash', x: s.x, z: s.z, size: 2 });
+      }
+      return;
+    }
+    const carrier = this.byId.get(s.carrier);
+    let tx;
+    let tz;
+    let R;
+    if (s.waypoints.length) {
+      tx = s.waypoints[0].x;
+      tz = s.waypoints[0].z;
+      R = 0;
+      if (Math.hypot(tx - s.x, tz - s.z) < 120) {
+        s.waypoints.shift();
+        s.loiter = { x: tx, z: tz };
+      }
+    } else if (s.loiter) {
+      tx = s.loiter.x;
+      tz = s.loiter.z;
+      R = s.cls === 'helo' ? 60 : 380;
+    } else if (carrier && carrier.alive) {
+      const a = this.time * 0.05 + (s.orbit || 0);
+      tx = carrier.x + Math.sin(a) * 600;
+      tz = carrier.z + Math.cos(a) * 600;
+      R = s.cls === 'helo' ? 200 : 450;
+    } else {
+      s.loiter = { x: s.x, z: s.z };
+      tx = s.x;
+      tz = s.z;
+      R = 300;
+    }
+    const dx = tx - s.x;
+    const dz = tz - s.z;
+    const d = Math.hypot(dx, dz);
+    let desired = Math.atan2(dx, dz);
+    let targetSpeed = c.maxSpeed * 0.85;
+    if (R && d < R * 1.5) {
+      if (s.cls === 'helo') targetSpeed = Math.max(4, d * 0.1); // hover
+      else desired = Math.atan2(s.x - tx, s.z - tz) + Math.PI / 2 + clamp((d - R) / R, -1, 1);
+    }
+    if (Math.hypot(s.x, s.z) > WORLD.radius) desired = Math.atan2(-s.x, -s.z);
+    s.speed += clamp(targetSpeed - s.speed, -c.accel * dt, c.accel * dt);
+    const turn = clamp(wrapAngle(desired - s.heading), -c.turnRate * dt, c.turnRate * dt);
+    s.heading = wrapAngle(s.heading + turn);
+    s.turn += (turn / dt - s.turn) * Math.min(1, dt * 2);
+    s.x += Math.sin(s.heading) * s.speed * dt;
+    s.z += Math.cos(s.heading) * s.speed * dt;
+    s.alt += (c.alt - s.alt) * Math.min(1, dt * 0.5);
+
+    s.launchCd -= dt;
+    s.sonarCd -= dt;
+    if (s.cls === 'helo') {
+      if (s.speed < 12) this.activePing(s);
+      // drop a torpedo on any identified submarine close by
+      if (s.ammo.light > 0 && s.launchCd <= 0 && !s.launchQueue.length) {
+        for (const k of this.contacts[s.side].values()) {
+          const e = this.byId.get(k.id);
+          if (!e || !e.alive || !e.submerged || k.level < 1 || e.side === s.side) continue;
+          if (Math.hypot(k.x - s.x, k.z - s.z) < 1300) {
+            s.launchQueue.push({ tid: e.id, type: 'light' });
+            break;
+          }
+        }
+      }
+    }
+    this.stepLaunches(s, c);
   }
 
   // Steer around islands that lie ahead.
@@ -615,11 +794,12 @@ export class World {
   }
 
   separateShips(dt) {
-    const list = this.ships.filter((s) => s.alive);
+    const list = this.ships.filter((s) => s.alive && !isAir(s));
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i];
         const b = list[j];
+        if (a.submerged !== b.submerged) continue; // subs pass beneath
         const min = (a.spec.len + b.spec.len) * 0.55;
         const dx = b.x - a.x;
         const dz = b.z - a.z;
@@ -645,16 +825,20 @@ export class World {
       s.launchQueue = s.launchQueue.filter((o) => o.tid !== q.tid);
       return;
     }
+    if (TORPEDO_TYPES[q.type]) return this.launchTorpedo(s, q, t, contact);
     const MT = MISSILE_TYPES[q.type];
     s.ammo[q.type]--;
-    s.ssm--;
+    this.countAmmo(s);
     s.launchCd = 0.45;
+    // A submarine firing missiles gives away its position.
+    if (s.submerged) for (const side of ['blue', 'red']) if (side !== s.side) this.upsert(side, s, 0);
     s.firedCount = (s.firedCount || 0) + 1;
     const fired = s.firedCount;
     const cell = c.vls[fired % c.vls.length];
     const canister = s.cls === 'fac';
     const side = fired % 2 ? 1 : -1;
     const p = toWorld(s, canister ? side * 1.5 : 0, cell);
+    const fromAir = isAir(s);
     const m = {
       id: this.nextId++,
       kind: 'ssm',
@@ -662,11 +846,11 @@ export class World {
       side: s.side,
       launcher: s.id,
       x: p.x,
-      y: canister ? 4 : 6,
+      y: fromAir ? s.alt - 4 : s.submerged ? -2 : canister ? 4 : 6,
       z: p.z,
       heading: canister ? wrapAngle(s.heading + side * 0.5) : s.heading,
-      pitch: canister ? 0.3 : 1.4,
-      speed: canister ? 60 : 30,
+      pitch: fromAir ? -0.15 : canister ? 0.3 : 1.4,
+      speed: fromAir ? s.speed + 60 : canister ? 60 : 30,
       contact: t.id,
       cT: contact.t,
       targetId: 0,
@@ -685,12 +869,128 @@ export class World {
     this.emit({ t: 'launch', k: 'ssm', mt: q.type, s: s.id, m: m.id, x: m.x, y: m.y, z: m.z, side: s.side, tgt: t.id });
   }
 
+  launchTorpedo(s, q, t, contact) {
+    const TT = TORPEDO_TYPES[q.type];
+    s.ammo[q.type]--;
+    this.countAmmo(s);
+    s.launchCd = 1.2;
+    const side = s.ammo[q.type] % 2 ? 1 : -1;
+    const p = isAir(s) ? { x: s.x, z: s.z } : toWorld(s, side * s.spec.beam * 0.6, s.spec.sub ? s.spec.len * 0.4 : 0);
+    const m = {
+      id: this.nextId++,
+      kind: 'torp',
+      type: q.type,
+      side: s.side,
+      launcher: s.id,
+      x: p.x,
+      y: -6,
+      z: p.z,
+      heading: Math.atan2(contact.x - p.x, contact.z - p.z),
+      pitch: 0,
+      speed: 20,
+      contact: t.id,
+      cT: contact.t,
+      targetId: 0,
+      locked: false,
+      tx: contact.x,
+      tz: contact.z,
+      fuel: TT.range * 1.1,
+      age: 0,
+      alive: true,
+      decoy: 0,
+    };
+    this.missiles.push(m);
+    this.emit({ t: 'launch', k: 'torp', mt: q.type, s: s.id, m: m.id, x: p.x, y: isAir(s) ? s.alt : 0, z: p.z, side: s.side, tgt: t.id });
+  }
+
+  // Torpedoes: run quietly underwater to the contact, then home with an
+  // acoustic seeker on the nearest hull — surface ships and subs alike.
+  stepTorp(m, dt) {
+    const TT = TORPEDO_TYPES[m.type];
+    m.age += dt;
+    m.speed = Math.min(TT.speed, m.speed + 20 * dt);
+    let tgt = m.locked ? this.byId.get(m.targetId) : null;
+    if (m.locked && (!tgt || !tgt.alive)) {
+      m.locked = false;
+      tgt = null;
+    }
+    if (!m.locked && m.decoy === 0) {
+      const c = this.contacts[m.side].get(m.contact);
+      if (c && c.t > m.cT) {
+        m.tx = c.x;
+        m.tz = c.z;
+        m.cT = c.t;
+      }
+      if (Math.hypot(m.tx - m.x, m.tz - m.z) < TT.seek) {
+        let best = null;
+        let bestD = TT.seek;
+        for (const s of this.ships) {
+          if (s.side === m.side || !s.alive || isAir(s)) continue;
+          const d = Math.hypot(s.x - m.x, s.z - m.z);
+          if (d < bestD) {
+            bestD = d;
+            best = s;
+          }
+        }
+        if (best) {
+          m.locked = true;
+          m.targetId = best.id;
+          tgt = best;
+        }
+      }
+    }
+    let ax = m.tx;
+    let az = m.tz;
+    if (m.decoy > 0) {
+      const d = this.decoys.find((q) => q.id === m.decoy);
+      if (d) {
+        ax = d.x;
+        az = d.z;
+      }
+    } else if (m.locked && tgt) {
+      const dist = Math.hypot(tgt.x - m.x, tgt.z - m.z);
+      const lead = Math.min(dist / m.speed, 10) * 0.7;
+      ax = m.tx = tgt.x + Math.sin(tgt.heading) * tgt.speed * lead;
+      az = m.tz = tgt.z + Math.cos(tgt.heading) * tgt.speed * lead;
+    }
+    const dist = Math.hypot(ax - m.x, az - m.z);
+    if (m.decoy === 0 && !m.locked && dist < 40) m.decoy = -1;
+    if (m.decoy !== -1) {
+      const turn = 0.9;
+      m.heading = wrapAngle(m.heading + clamp(wrapAngle(Math.atan2(ax - m.x, az - m.z) - m.heading), -turn * dt, turn * dt));
+    }
+    m.x += Math.sin(m.heading) * m.speed * dt;
+    m.z += Math.cos(m.heading) * m.speed * dt;
+    m.fuel -= m.speed * dt;
+    if (m.decoy > 0 && dist < 30) {
+      m.alive = false;
+      this.emit({ t: 'splash', x: m.x, z: m.z, size: 2, m: m.id });
+      return;
+    }
+    if (m.locked && tgt && tgt.alive) {
+      const l = toLocal(tgt, m.x, m.z);
+      if (Math.abs(l.lz) < tgt.spec.len * 0.5 + 2 && Math.abs(l.lx) < tgt.spec.beam * 0.5 + 3) {
+        m.alive = false;
+        this.stats[m.side].ssmHits++;
+        this.emit({ t: 'hit', k: 'torp', s: tgt.id, x: m.x, y: 0, z: m.z, m: m.id, side: m.side });
+        this.damage(tgt, TT.dmg * rand(0.9, 1.15), m, 0.5, m.side);
+        return;
+      }
+    }
+    if (islandHeight(this.map, m.x, m.z) > 0) {
+      m.alive = false;
+      this.emit({ t: 'airburst', x: m.x, y: 1, z: m.z, small: true, land: true, m: m.id });
+      return;
+    }
+    if (m.fuel <= 0) m.alive = false;
+  }
+
   // Guns auto-engage identified enemies; autocannons prefer incoming missiles.
   stepGuns(s, c, dt) {
     if (!c.guns.length) return;
     const C = this.contacts[s.side];
     const inRange = (t, range) => {
-      if (!t || !t.alive || !isCombatant(t) || t.side === s.side) return false;
+      if (!t || !t.alive || !isCombatant(t) || t.side === s.side || isAir(t) || t.submerged) return false;
       const k = C.get(t.id);
       return k && k.level > 0 && this.time - k.t < 3.5 && Math.hypot(t.x - s.x, t.z - s.z) < range;
     };
@@ -720,6 +1020,15 @@ export class World {
             this.stats[s.side].intercepts++;
             this.emit({ t: 'intercept', k: 'gun', side: s.side, x: threat.x, y: threat.y, z: threat.z, m: threat.id });
           }
+          return;
+        }
+        const plane = this.nearestAircraft(s, g.antiMissile.range * 1.3);
+        if (plane) {
+          if (s.gunCd[gi] <= 0) {
+            s.gunCd[gi] = 0.12;
+            this.emit({ t: 'ciws', s: s.id, x: plane.x, y: plane.alt, z: plane.z, k: 'ac' });
+          }
+          if (Math.random() < 1 - Math.exp(-0.5 * dt)) this.damage(plane, 99, null, 0, s.side);
           return;
         }
       }
@@ -797,7 +1106,7 @@ export class World {
       const iz = sh.z - sh.vz * dt * (1 - f);
       let hit = null;
       for (const s of this.ships) {
-        if (s.side === sh.side || !s.alive) continue;
+        if (s.side === sh.side || !s.alive || isAir(s) || s.submerged) continue;
         const l = toLocal(s, ix, iz);
         if (Math.abs(l.lz) < s.spec.len * 0.5 && Math.abs(l.lx) < s.spec.beam * 0.5 + 1) {
           hit = s;
@@ -835,12 +1144,17 @@ export class World {
           best = m;
         }
       }
+      let air = null;
+      if (!best) {
+        air = this.nearestAircraft(s, WEAPONS.sam.range * 1.4);
+        if (air && (air.samAssigned || 0) < 1) best = air;
+      }
       if (best) {
         s.sam--;
         s.samCd = 1.6 * rand(0.85, 1.15);
-        best.samAssigned++;
+        best.samAssigned = (best.samAssigned || 0) + 1;
         const p = toWorld(s, 0, c.vls[0]);
-        const m = { id: this.nextId++, kind: 'sam', side: s.side, launcher: s.id, x: p.x, y: 6, z: p.z, heading: s.heading, pitch: 1.5, speed: 60, targetId: best.id, age: 0, alive: true };
+        const m = { id: this.nextId++, kind: 'sam', side: s.side, launcher: s.id, x: p.x, y: 6, z: p.z, heading: s.heading, pitch: 1.5, speed: 60, targetId: best.id, air: !!air, age: 0, alive: true };
         this.missiles.push(m);
         this.emit({ t: 'launch', k: 'sam', s: s.id, m: m.id, x: m.x, y: m.y, z: m.z, side: s.side });
       }
@@ -865,6 +1179,16 @@ export class World {
       this.emit({ t: 'intercept', k, side: s.side, x: threat.x, y: threat.y, z: threat.z, m: threat.id });
     };
 
+    // CIWS and lasers also swat aircraft that stray too close.
+    const plane = this.nearestAircraft(s, WEAPONS.laser.range);
+    if (plane && !nearest(WEAPONS.laser.range) && (c.ciws || c.laser)) {
+      if (s.ciwsCd <= 0) {
+        s.ciwsCd = 0.1;
+        this.emit({ t: c.laser ? 'laser' : 'ciws', s: s.id, x: plane.x, y: plane.alt, z: plane.z });
+      }
+      if (Math.random() < 1 - Math.exp(-(c.ciwsPk + c.laser) * 0.8 * dt)) this.damage(plane, 99, null, 0, s.side);
+    }
+
     // CIWS: last-ditch gun.
     if (c.ciws > 0) {
       const threat = nearest(WEAPONS.ciws.range);
@@ -887,6 +1211,21 @@ export class World {
         if (Math.random() < 1 - Math.exp(-WEAPONS.laser.rate * c.laser * MISSILE_TYPES[threat.type].defense * dt)) kill(threat, 'laser');
       }
     }
+  }
+
+  // Nearest hostile aircraft we have on the plot.
+  nearestAircraft(s, range) {
+    let best = null;
+    let bestD = range;
+    for (const a of this.ships) {
+      if (!isAir(a) || !a.alive || a.side === s.side || !this.contacts[s.side].has(a.id)) continue;
+      const d = Math.hypot(a.x - s.x, a.z - s.z, a.alt - 10);
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    return best;
   }
 
   stepSSM(m, dt) {
@@ -924,7 +1263,7 @@ export class World {
       const fx = Math.sin(m.heading);
       const fz = Math.cos(m.heading);
       for (const s of this.ships) {
-        if (s.side === m.side || !s.alive) continue;
+        if (s.side === m.side || !s.alive || isAir(s) || s.submerged) continue;
         if ((s.x - m.x) * fx + (s.z - m.z) * fz < 0) continue;
         const d = Math.hypot(s.x - m.tx, s.z - m.tz);
         if (d < bestD) {
@@ -989,7 +1328,8 @@ export class World {
       this.emit({ t: 'airburst', x: m.x, y: m.y, z: m.z, m: m.id });
       return;
     }
-    if (m.locked && tgt && tgt.alive && m.y < 16) {
+    if (m.locked && tgt && tgt.submerged) m.locked = false; // dived under it
+    if (m.locked && tgt && tgt.alive && m.y < 16 && !tgt.submerged) {
       const l = toLocal(tgt, m.x, m.z);
       if (Math.abs(l.lz) < tgt.spec.len * 0.5 + 3 && Math.abs(l.lx) < tgt.spec.beam * 0.5 + 4) {
         m.alive = false;
@@ -1014,6 +1354,7 @@ export class World {
   stepSAM(m, dt) {
     const W = WEAPONS.sam;
     m.age += dt;
+    if (m.air) return this.stepSAMvsAir(m, dt);
     let t = this.missiles.find((q) => q.id === m.targetId);
     if (!t || !t.alive) {
       t = null;
@@ -1071,6 +1412,39 @@ export class World {
     }
   }
 
+  // A SAM chasing an aircraft.
+  stepSAMvsAir(m, dt) {
+    const W = WEAPONS.sam;
+    const t = this.byId.get(m.targetId);
+    if (!t || !t.alive || m.age > W.life) {
+      m.alive = false;
+      this.emit({ t: 'airburst', x: m.x, y: m.y, z: m.z, small: true, m: m.id });
+      if (t) t.samAssigned = Math.max(0, (t.samAssigned || 1) - 1);
+      return;
+    }
+    m.speed = Math.min(W.speed, m.speed + 500 * dt);
+    if (m.age > 0.3) {
+      const d0 = Math.hypot(t.x - m.x, t.z - m.z, t.alt - m.y);
+      const lead = (d0 / m.speed) * 0.9;
+      const px = t.x + Math.sin(t.heading) * t.speed * lead;
+      const pz = t.z + Math.cos(t.heading) * t.speed * lead;
+      const dh = Math.atan2(px - m.x, pz - m.z);
+      const dp = Math.atan2(t.alt - m.y, Math.hypot(px - m.x, pz - m.z));
+      m.heading = wrapAngle(m.heading + clamp(wrapAngle(dh - m.heading), -W.turn * dt, W.turn * dt));
+      m.pitch += clamp(dp - m.pitch, -W.turn * dt, W.turn * dt);
+    }
+    const cp = Math.cos(m.pitch);
+    m.x += Math.sin(m.heading) * cp * m.speed * dt;
+    m.z += Math.cos(m.heading) * cp * m.speed * dt;
+    m.y = Math.max(2, m.y + Math.sin(m.pitch) * m.speed * dt);
+    if (Math.hypot(t.x - m.x, t.z - m.z, t.alt - m.y) < 18) {
+      m.alive = false;
+      t.samAssigned = Math.max(0, (t.samAssigned || 1) - 1);
+      if (Math.random() < 0.75) this.damage(t, 99, null, 0, m.side);
+      else this.emit({ t: 'airburst', x: m.x, y: m.y, z: m.z, small: true, m: m.id });
+    }
+  }
+
   damage(s, amount, source, fireChance = 0, by = null) {
     if (!s.alive) return;
     s.hp -= amount;
@@ -1085,7 +1459,7 @@ export class World {
       if (Math.random() < fireChance && s.fires.length < 4) {
         s.fires.push({ lx: clamp(l.lx, -c.beam * 0.3, c.beam * 0.3), lz: clamp(l.lz, -c.len * 0.4, c.len * 0.4), t: rand(16, 30) });
       }
-      if (source.kind === 'ssm' && !s.civ && Math.random() < 0.45) {
+      if ((source.kind === 'ssm' || source.kind === 'torp') && !s.civ && Math.random() < 0.45) {
         const sys = ['radar', 'engine', 'gun'][Math.floor(Math.random() * 3)];
         if (!s.dmg[sys]) {
           s.dmg[sys] = true;
@@ -1100,8 +1474,9 @@ export class World {
       s.waypoints = [];
       s.launchQueue = [];
       s.turn = rand(-0.4, 0.4);
-      if (isCombatant(s)) this.stats[enemyOf(s.side)].sunk++;
-      this.emit({ t: 'sink', s: s.id, x: s.x, z: s.z });
+      if (isCombatant(s) && !isAir(s)) this.stats[enemyOf(s.side)].sunk++;
+      if (isAir(s)) this.emit({ t: 'shotdown', s: s.id, x: s.x, y: s.alt, z: s.z, side: by });
+      else this.emit({ t: 'sink', s: s.id, x: s.x, z: s.z });
     }
   }
 
@@ -1143,7 +1518,7 @@ export class World {
         s.chaff,
         r3(s.gunAim),
         s.fires.map((f) => [r1(f.lx), r1(f.lz)]),
-        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0) | (s.radar ? 0 : 8),
+        (s.dmg.radar ? 1 : 0) | (s.dmg.engine ? 2 : 0) | (s.dmg.gun ? 4 : 0) | (s.radar ? 0 : 8) | (s.submerged ? 16 : 0),
         s.target || 0,
         s.throttle,
         s.waypoints.map((w) => [r1(w.x), r1(w.z)]),
@@ -1152,11 +1527,13 @@ export class World {
         Math.max(0, r1(s.chaffCd)),
         SIDE_CODE[s.side],
         s.cls,
-        [s.ammo.skimmer, s.ammo.supersonic, s.ammo.cruise],
+        [s.ammo.skimmer, s.ammo.supersonic, s.ammo.cruise, s.ammo.heavy, s.ammo.light],
         r1(s.jamCd),
         s.civ ? s.name : 0,
+        r1(s.alt),
+        Math.max(0, r1(s.sonarCd)),
       ]),
-      missiles: this.missiles.map((m) => [m.id, m.kind === 'ssm' ? 0 : 1, m.side === 'blue' ? 0 : 1, r1(m.x), r1(m.y), r1(m.z), r3(m.heading), r3(m.pitch), r1(m.speed), m.targetId || 0, m.type || 0]),
+      missiles: this.missiles.map((m) => [m.id, m.kind === 'ssm' ? 0 : m.kind === 'sam' ? 1 : 2, m.side === 'blue' ? 0 : 1, r1(m.x), r1(m.y), r1(m.z), r3(m.heading), r3(m.pitch), r1(m.speed), m.targetId || 0, m.type || 0]),
       contacts: { blue: contacts('blue'), red: contacts('red') },
       jams: this.jams.map((j) => [j.id, j.ship, SIDE_CODE[j.side], r1(j.x), r1(j.z), r3(j.dir), r3(j.half), j.range, r1(j.t), j.max]),
       cp: [r3(this.cp.progress), this.cp.owner ? SIDE_CODE[this.cp.owner] : -1, r1(this.cp.score.blue), r1(this.cp.score.red), this.cp.contested ? 1 : 0],

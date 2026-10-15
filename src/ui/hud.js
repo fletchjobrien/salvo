@@ -97,9 +97,12 @@ export class Hud {
     this.updateControl();
 
     // threat alert
-    const threats = g.state.missiles.filter((m) => m.kind === 'ssm' && m.side !== g.side && g.missileVisible(m));
+    const threats = g.state.missiles.filter((m) => m.kind !== 'sam' && m.side !== g.side && g.missileVisible(m));
+    const torps = threats.filter((m) => m.kind === 'torp').length;
     this.alert.classList.toggle('hidden', threats.length === 0);
-    if (threats.length) this.alert.textContent = `VAMPIRE ×${threats.length} INBOUND — [G] CHAFF`;
+    if (threats.length) {
+      this.alert.textContent = torps === threats.length ? `TORPEDO ×${torps} — [G] DECOYS` : `VAMPIRE ×${threats.length - torps}${torps ? ` + TORPEDO ×${torps}` : ''} — [G] CHAFF`;
+    }
 
     for (const s of mine) {
       const c = this.cards.get(s.id);
@@ -108,13 +111,18 @@ export class Hud {
       c.bar.style.width = `${hp * 100}%`;
       c.bar.style.background = hp > 0.6 ? '#7dff9a' : hp > 0.3 ? '#ffd166' : '#ff5a4a';
       const a = s.ammo || {};
-      c.ssm.textContent = [a.skimmer ? `SKM ${a.skimmer}` : '', a.supersonic ? `SSN ${a.supersonic}` : '', a.cruise ? `CRU ${a.cruise}` : ''].filter(Boolean).join(' ') || 'NO SSM';
+      c.ssm.textContent =
+        [a.skimmer ? `SKM ${a.skimmer}` : '', a.supersonic ? `SSN ${a.supersonic}` : '', a.cruise ? `CRU ${a.cruise}` : '', a.heavy ? `TRP ${a.heavy}` : '', a.light ? `ASW ${a.light}` : '']
+          .filter(Boolean)
+          .join(' ') || (s.spec.air ? 'UNARMED' : 'NO SSM');
       c.sam.textContent = s.spec && s.spec.sam ? `SAM ${s.sam}` : '';
       c.spd.textContent = `${Math.round(s.speed * KNOTS)}kt`;
       const st = [];
       if (!s.alive) st.push('SINKING');
       else {
-        if (s.radar === false) st.push('RADAR OFF');
+        if (s.submerged) st.push('SUBMERGED');
+        else if (s.radar === false) st.push('RADAR OFF');
+        if (s.spec.sonar && s.spec.sonar.active && !s.spec.air) st.push(s.sonarCd > 0 ? `PING ${Math.ceil(s.sonarCd)}s` : 'PING READY');
         if (s.spec.canJam) st.push(s.jamCd > 0 ? `JAM ${Math.ceil(s.jamCd)}s` : 'JAM READY');
         if (s.fires && s.fires.length) st.push('FIRE');
         if (s.dmg.radar) st.push('RADAR');
@@ -151,6 +159,7 @@ export class Hud {
     const throttle = sel.length ? sel[0].throttle : -1;
     const sameThrottle = sel.every((s) => s.throttle === throttle);
     const ssm = sel.reduce((a, s) => a + s.ssm, 0);
+    const torps = sel.reduce((a, s) => a + (s.torps || 0), 0);
     const chaff = sel.reduce((a, s) => a + s.chaff, 0);
     const chaffReady = sel.some((s) => s.chaff > 0 && !(s.chaffCd > 0));
     const radarOn = sel.every((s) => s.radar !== false);
@@ -159,7 +168,12 @@ export class Hud {
     const canJam = jammers.length > 0;
     const jamReady = jammers.some((s) => !(s.jamCd > 0));
     const jamWait = canJam ? Math.ceil(Math.min(...jammers.map((s) => s.jamCd || 0))) : 0;
-    const key = [sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, g.jamMode, radarOn, radarMixed, canJam, jamReady, jamWait].join('|');
+    const subs = sel.filter((s) => s.spec.sub);
+    const allDown = subs.length && subs.every((s) => s.submerged);
+    const sonars = sel.filter((s) => s.spec.sonar && s.spec.sonar.active && !s.spec.air);
+    const sonarReady = sonars.some((s) => !(s.sonarCd > 0));
+    const sonarWait = sonars.length ? Math.ceil(Math.min(...sonars.map((s) => s.sonarCd || 0))) : 0;
+    const key = [torps, subs.length, allDown, sonars.length, sonarReady, sonarWait, sel.map((s) => s.id).join(','), throttle, sameThrottle, ssm, chaff, chaffReady, g.salvo, g.fireMode, g.jamMode, radarOn, radarMixed, canJam, jamReady, jamWait].join('|');
     if (key === this.ordersKey) return;
     this.ordersKey = key;
     if (!sel.length) {
@@ -182,8 +196,16 @@ export class Hud {
         <button class="radar ${radarOn ? 'on' : radarMixed ? 'mixed' : 'off'}" data-act="radar" title="Radar on: pings find contacts and SAMs work, but the enemy can see you radiating. Off: hidden, but blind and no SAMs.">[B] RADAR ${radarOn ? 'ON' : radarMixed ? 'MIXED' : 'OFF'}</button>
         <button class="jam ${g.jamMode ? 'on' : ''}" data-act="jam" ${jamReady ? '' : 'disabled'} title="Aim a jamming cone: blinds enemy radars, SAMs and missile seekers inside it for a few seconds.">[J] JAM ${!canJam ? 'NONE' : jamReady ? 'READY' : jamWait + 's'}</button>
       </div>
+      ${
+        sonars.length || subs.length
+          ? `<div class="grp sensors"><span class="lbl">UNDERSEA</span>
+        ${sonars.length ? `<button data-act="sonar" ${sonarReady ? '' : 'disabled'} title="Active sonar ping: finds submarines nearby, but every enemy within twice the range hears you.">[P] PING ${sonarReady ? 'READY' : sonarWait + 's'}</button>` : ''}
+        ${subs.length ? `<button class="${allDown ? 'on' : ''}" data-act="dive" title="Submerged: invisible to radar, only sonar can find you.">[U] ${allDown ? 'SUBMERGED' : 'SURFACED'}</button>` : ''}
+      </div>`
+          : ''
+      }
       <div class="grp">
-        <button class="fire ${g.fireMode ? 'on' : ''}" data-act="fire" ${ssm ? '' : 'disabled'}>[F] FIRE SSM ${ssm}</button>
+        <button class="fire ${g.fireMode ? 'on' : ''}" data-act="fire" ${ssm + torps ? '' : 'disabled'}>[F] FIRE ${ssm + torps}</button>
         <button class="danger" data-act="chaff" ${chaffReady ? '' : 'disabled'}>[G] CHAFF ${chaff}</button>
       </div>`;
     this.orders.querySelectorAll('button').forEach((b) => {
@@ -196,6 +218,8 @@ export class Hud {
         else if (b.dataset.act === 'chaff') g.chaff();
         else if (b.dataset.act === 'radar') g.toggleRadar();
         else if (b.dataset.act === 'jam') g.toggleJamMode();
+        else if (b.dataset.act === 'sonar') g.sonarPing();
+        else if (b.dataset.act === 'dive') g.toggleDive();
       });
     });
   }

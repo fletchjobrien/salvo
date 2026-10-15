@@ -291,3 +291,5 @@ button.big { font-family: 'Press Start 2P', monospace; font-size: 14px; padding:
 .slots { grid-template-columns: repeat(3, 1fr); }
 .stats .line { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 10px; font-size: 16px; color: #7fa9ba; border-top: 1px solid rgba(98,216,255,0.08); padding-top: 2px; }
 .stats .line b { color: #fff; font-weight: normal; text-align: right; }
+.pips i.air { background: #e0e6ea; } .slot.air { border-color: #e0e6ea; background: rgba(70, 80, 90, 0.8); }
+.ch.air { color: #e0e6ea; } .part.air { border-left-color: #e0e6ea; }
