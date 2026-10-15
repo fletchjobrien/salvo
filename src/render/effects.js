@@ -592,6 +592,14 @@ export class Effects {
     this.addShake(x, 0, z, 2);
   }
 
+  // A whale blowing: a soft, narrow plume of mist.
+  spout(x, z) {
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.smoke.emit(x + Math.cos(a) * 0.6, 2, z + Math.sin(a) * 0.6, Math.cos(a) * rand(0.3, 1.5), rand(9, 16), Math.sin(a) * rand(0.3, 1.5), rand(1.2, 2.2), rand(1, 2), rand(5, 9), C(0.95, 0.97, 1, 0.7), C(0.9, 0.94, 1, 0), 0.9, 7);
+    }
+  }
+
   bubbles(x, z, r) {
     for (let i = 0; i < 3; i++) {
       const a = Math.random() * Math.PI * 2;

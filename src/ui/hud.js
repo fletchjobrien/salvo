@@ -1,4 +1,5 @@
-import { CLASSES, SPEED_LEVELS, KNOTS, AIR_SUPPORT } from '../config.js';
+import { CLASSES, SPEED_LEVELS, KNOTS, AIR_SUPPORT, COAST_MASK } from '../config.js';
+import { nearCoast } from '../sim/map.js';
 
 const AIR_KEYS = { cap: 'I', strike: 'O', mpa: 'K', aew: 'L' };
 
@@ -158,6 +159,7 @@ export class Hud {
       if (!s.alive) st.push('SINKING');
       else {
         if (s.submerged) st.push('SUBMERGED');
+        else if (!s.spec.air && g.state.map && nearCoast(g.state.map, s.x, s.z, COAST_MASK)) st.push('COAST MASK');
         else if (s.radar === false) st.push('RADAR OFF');
         if (s.spec.sonar && s.spec.sonar.active && !s.spec.air) st.push(s.sonarCd > 0 ? `PING ${Math.ceil(s.sonarCd)}s` : 'PING READY');
         if (s.spec.canJam) st.push(s.jamCd > 0 ? `JAM ${Math.ceil(s.jamCd)}s` : 'JAM READY');

@@ -53,6 +53,8 @@ Click **FLEET CREATOR** on the main menu. You have 1,400 points for up to 6 ship
 - **Submarines** are invisible to radar while submerged (U to surface/dive). Torpedoes run underwater: SAMs and CIWS can't stop them, decoys can.
 - **Aircraft** can be selected and ordered like ships; with no orders they orbit their carrier. Helicopters hover to dip sonar and attack submarines automatically.
 - **Air support** comes from off the map, on a cooldown: **I** fighter CAP (air-to-air missiles at enemy aircraft), **O** strike package (two jets fire sea-skimmers at an identified ship), **K** maritime patrol (big radar, sonobuoys, torpedoes for submarines), **L** AEW radar plane (11 km sweep). They fly in from your edge of the map, stay for a while, then fly home. The AI uses them too.
+- **Islands** block radar, line of sight and sea-skimming missiles. Some always flank the control point and others form channels between the fleets. A ship within 350 m of a coast hides in radar land clutter: enemy radar detects it at half range (the card shows COAST MASK).
+- **Neutral traffic**: freighters follow a shipping lane that changes course at several turning points and runs through the control point. Airliners cross high overhead (air defences ignore them, but they appear as unknown radar contacts). Whales wander the area and sound like submarines on passive sonar; an active ping identifies them.
 - **Jamming** is cast (J, then click): a cone that blinds enemy radars, SAMs and missile seekers inside it for a few seconds, then recharges.
 
 ## Develop

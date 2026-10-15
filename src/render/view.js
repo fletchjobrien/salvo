@@ -419,6 +419,11 @@ export class GameView {
         ty = s.alt;
         tp = s.alive ? -0.05 : 0.6;
         tr = -s.turn * 0.9 + (s.alive ? 0 : Math.sin(this.time * 9) * 0.6);
+      } else if (c.bio) {
+        // whales: just awash when up, a few metres down otherwise
+        ty = s.submerged ? -6 : 0.4;
+        tp = 0;
+        tr = 0;
       } else if (s.submerged) {
         ty = -9;
         tp = 0;
@@ -584,6 +589,10 @@ export class GameView {
           break;
         case 'sonar':
           this.fx.ring(e.x, e.z, 90, 1.2, 0.5, 0x80e0ff);
+          break;
+        case 'spout':
+          // only where someone could see it: the camera is close
+          if (!this.camPos || Math.hypot(this.camPos.x - e.x, this.camPos.z - e.z) < 3000) this.fx.spout(e.x, e.z);
           break;
         case 'sink': {
           this.fx.sinkBlast(e.x, e.z);

@@ -377,7 +377,7 @@ class Game {
     if (!s) return;
     this.rig.follow = () => {
       const q = this.shipById(id);
-      return q && (q.alive || q.sinkT < 20) ? { x: q.x, y: 0, z: q.z } : null;
+      return q && (q.alive || q.sinkT < 20) ? { x: q.x, y: q.spec && q.spec.air ? q.alt : 0, z: q.z } : null;
     };
     if (this.rig.wantDist > 900) this.rig.wantDist = 380;
   }
@@ -1050,7 +1050,7 @@ class Game {
           break;
         case 'ident':
           if (e.side === me && s && this.inBattle()) {
-            if (s.civ) this.hud.message(`Contact identified: CIVILIAN ${s.name.toUpperCase()}`, 'good');
+            if (s.civ) this.hud.message(s.spec.bio ? 'Contact identified: BIOLOGIC — a whale, not a submarine' : `Contact identified: CIVILIAN ${s.name.toUpperCase()}`, 'good');
             else {
               this.hud.message(`Contact identified: ${CLASSES[s.cls].label.toUpperCase()} ${s.name.toUpperCase()}`, 'enemy');
               this.audio.blip(1300, 0.08, 'sine', 0.15);

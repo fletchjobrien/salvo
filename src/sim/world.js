@@ -16,9 +16,10 @@ import {
   CONTROL,
   AIR_SUPPORT,
   AAM,
+  COAST_MASK,
 } from '../config.js';
 import { buildSpec, presetFleet, validateFleet } from '../fleet.js';
-import { generateMap, islandHeight, islandRadius, lineBlocked } from './map.js';
+import { generateMap, islandHeight, islandRadius, lineBlocked, lanePath, pathPoint, nearCoast } from './map.js';
 
 const TAU = Math.PI * 2;
 export const wrapAngle = (a) => {
@@ -69,6 +70,7 @@ export function jammedAt(jams, side, x, z) {
   return false;
 }
 
+const AIRLINES = ['SKY', 'ORION', 'TRANSPAC', 'NORDAIR', 'CORAL', 'MERIDIAN'];
 const CIV_NAMES = ['Aurora', 'Pacific Star', 'Nordic Sun', 'Meridian', 'Kowloon Bay', 'Santa Rosa', 'Baltic Trader', 'Ocean Pride', 'Cape Verde', 'Marlin', 'Atlas', 'Coral Sea'];
 
 export class World {
@@ -127,6 +129,7 @@ export class World {
     }
     // a few freighters already under way
     for (const t of [0.2, 0.5, 0.8]) w.spawnCivilian(t, Math.random() < 0.5 ? 1 : -1);
+    for (let i = 0; i < 3; i++) w.spawnWhale();
     return w;
   }
 
@@ -187,21 +190,55 @@ export class World {
 
   // A freighter on the shipping lane. t: 0..1 along the lane; dir: +1 a->b.
   spawnCivilian(t, dir) {
-    const L = this.map.lane;
-    const px = L.ax + (L.bx - L.ax) * t;
-    const pz = L.az + (L.bz - L.az) * t;
-    // keep to the right of the lane centre
-    const off = dir * 110;
-    const x = px + L.nz * off;
-    const z = pz - L.nx * off;
-    const end = dir > 0 ? { x: L.bx + L.nz * off, z: L.bz - L.nx * off } : { x: L.ax + L.nz * off, z: L.az - L.nx * off };
+    // follow the lane's turning points, keeping to the right of the centre
+    const path = lanePath(this.map.lane, dir);
+    const p = pathPoint(path, dir > 0 ? t : 1 - t);
+    const next = path[p.next];
     const cls = Math.random() < 0.6 ? 'cargo' : 'tanker';
     const name = 'MV ' + CIV_NAMES[Math.floor(Math.random() * CIV_NAMES.length)];
-    const s = this.spawnShip('civ', { cls, modules: [], name, hull: 'CIVILIAN' }, x, z, Math.atan2(end.x - x, end.z - z));
-    s.waypoints = [end];
+    const s = this.spawnShip('civ', { cls, modules: [], name, hull: 'CIVILIAN' }, p.x, p.z, Math.atan2(next.x - p.x, next.z - p.z));
+    s.waypoints = path.slice(p.next);
     s.throttle = 3;
     s.speed = s.spec.maxSpeed * 0.8;
     s.civ = true;
+    return s;
+  }
+
+  // A whale: wanders slowly, mostly under water. Passive sonar hears it as
+  // an unknown contact, which may be a submarine.
+  spawnWhale() {
+    for (let i = 0; i < 30; i++) {
+      const x = rand(-6000, 6000);
+      const z = rand(-3500, 3500);
+      if (islandHeight(this.map, x, z) > 0 || nearCoast(this.map, x, z, 200)) continue;
+      const s = this.spawnShip('civ', { cls: 'whale', modules: [], name: 'Whale', hull: 'BIOLOGIC' }, x, z, rand(0, TAU));
+      s.civ = true;
+      s.radar = false;
+      s.throttle = 2;
+      s.speed = 1.5;
+      s.surfaceT = rand(20, 80);
+      s.waypoints = [this.clearOfLand(x + rand(-2500, 2500), z + rand(-2500, 2500), 40)];
+      return s;
+    }
+    return null;
+  }
+
+  // An airliner crossing the map high up: a radar contact that is not a
+  // threat. Air defences do not engage it.
+  spawnAirliner() {
+    const a = rand(0, TAU);
+    const b = a + Math.PI + rand(-0.7, 0.7);
+    const R = WORLD.radius + 1200;
+    const x = Math.cos(a) * R;
+    const z = Math.sin(a) * R;
+    const ex = Math.cos(b) * R;
+    const ez = Math.sin(b) * R;
+    const name = AIRLINES[Math.floor(Math.random() * AIRLINES.length)] + ' ' + (100 + Math.floor(Math.random() * 900));
+    const s = this.spawnShip('civ', { cls: 'airliner', modules: [], name, hull: 'CIVILIAN' }, x, z, Math.atan2(ex - x, ez - z));
+    s.civ = true;
+    s.alt = s.spec.alt;
+    s.speed = s.spec.maxSpeed;
+    s.transit = { x: ex, z: ez };
     return s;
   }
 
@@ -454,6 +491,11 @@ export class World {
       for (const s of this.ships) if (s.gone || (s.civ && !s.alive && s.sinkT > 50)) this.byId.delete(s.id);
       this.ships = this.ships.filter((s) => this.byId.has(s.id));
     }
+    this.airlinerT = (this.airlinerT ?? rand(20, 50)) - dt;
+    if (this.airlinerT <= 0) {
+      this.airlinerT = rand(55, 95);
+      if (this.ships.filter((s) => s.cls === 'airliner').length < 2) this.spawnAirliner();
+    }
     this.civT -= dt;
     if (this.civT <= 0) {
       this.civT = rand(30, 50);
@@ -521,7 +563,7 @@ export class World {
         for (const f of own) {
           const d = Math.hypot(e.x - f.x, e.z - f.z);
           // lookouts
-          if (d < SENSORS.visual && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) {
+          if (d < (e.spec.bio ? 1200 : SENSORS.visual) && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) {
             this.upsert(side, e, 1);
             seen = true;
             break;
@@ -550,9 +592,11 @@ export class World {
           this.emit({ t: 'ping', s: f.id, side, r: range, blind });
           if (blind) return;
           for (const e of this.ships) {
-            if (e.side === side || !e.alive || e.submerged) continue;
+            if (e.side === side || !e.alive || e.submerged || e.spec.bio) continue;
             const d = Math.hypot(e.x - f.x, e.z - f.z);
-            if (d < range && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) this.upsert(side, e, d < range * r.ident ? 1 : 0);
+            // close inshore a ship hides in the land clutter
+            const r2 = !isAir(e) && nearCoast(this.map, e.x, e.z, COAST_MASK) ? range * 0.5 : range;
+            if (d < r2 && (isAir(e) || isAir(f) || !lineBlocked(this.map, f.x, f.z, e.x, e.z))) this.upsert(side, e, d < range * r.ident ? 1 : 0);
           }
         });
       }
@@ -644,7 +688,8 @@ export class World {
       if (dist < (last ? c.len * 1.2 : c.len * 2.5)) {
         s.waypoints.shift();
         if (last) {
-          if (s.civ) s.gone = true;
+          if (s.spec.bio) s.waypoints = [this.clearOfLand(s.x + rand(-2500, 2500), s.z + rand(-2500, 2500), 40)];
+          else if (s.civ) s.gone = true;
           else s.loiter = { x: wp.x, z: wp.z };
         }
       } else {
@@ -703,6 +748,19 @@ export class World {
       if (!s.alive) return;
     }
     s.fires = s.fires.filter((f) => f.t > 0);
+    if (s.spec.bio) {
+      // whales surface to breathe now and then, and blow
+      s.surfaceT -= dt;
+      if (s.surfaceT <= 0) {
+        s.submerged = !s.submerged;
+        s.surfaceT = s.submerged ? rand(50, 110) : rand(14, 24);
+        s.spoutT = 0.5;
+      }
+      if (!s.submerged && (s.spoutT -= dt) <= 0) {
+        s.spoutT = rand(5, 9);
+        this.emit({ t: 'spout', s: s.id, x: s.x, z: s.z });
+      }
+    }
     if (s.civ) return;
 
     if (s.target) {
@@ -734,7 +792,15 @@ export class World {
     let tx;
     let tz;
     let R;
-    if (s.mission) {
+    if (s.transit) {
+      tx = s.transit.x;
+      tz = s.transit.z;
+      R = 0;
+      if (Math.hypot(tx - s.x, tz - s.z) < 400) {
+        s.gone = true;
+        return;
+      }
+    } else if (s.mission) {
       ({ tx, tz, R } = this.missionTarget(s, dt));
       if (s.gone) return;
     } else if (s.waypoints.length) {
@@ -769,7 +835,7 @@ export class World {
       if (s.cls === 'helo' && !s.mission) targetSpeed = Math.max(4, d * 0.1); // hover
       else desired = Math.atan2(s.x - tx, s.z - tz) + Math.PI / 2 + clamp((d - R) / R, -1, 1);
     }
-    if (Math.hypot(s.x, s.z) > WORLD.radius && !s.mission) desired = Math.atan2(-s.x, -s.z);
+    if (Math.hypot(s.x, s.z) > WORLD.radius && !s.mission && !s.transit) desired = Math.atan2(-s.x, -s.z);
     if (s.mission) targetSpeed = c.maxSpeed * (s.mission.phase === 'on' ? 0.75 : 1);
     s.speed += clamp(targetSpeed - s.speed, -c.accel * dt, c.accel * dt);
     const turn = clamp(wrapAngle(desired - s.heading), -c.turnRate * dt, c.turnRate * dt);
@@ -1011,7 +1077,7 @@ export class World {
         let best = null;
         let bestD = TT.seek;
         for (const s of this.ships) {
-          if (s.side === m.side || !s.alive || isAir(s)) continue;
+          if (s.side === m.side || !s.alive || isAir(s) || s.spec.bio) continue;
           const d = Math.hypot(s.x - m.x, s.z - m.z);
           if (d < bestD) {
             bestD = d;
@@ -1304,7 +1370,7 @@ export class World {
     let best = null;
     let bestD = range;
     for (const a of this.ships) {
-      if (!isAir(a) || !a.alive || a.side === s.side || !this.contacts[s.side].has(a.id)) continue;
+      if (!isAir(a) || !a.alive || a.side === s.side || a.civ || !this.contacts[s.side].has(a.id)) continue;
       const d = Math.hypot(a.x - s.x, a.z - s.z, a.alt - 10);
       if (d < bestD) {
         bestD = d;
@@ -1349,7 +1415,7 @@ export class World {
       const fx = Math.sin(m.heading);
       const fz = Math.cos(m.heading);
       for (const s of this.ships) {
-        if (s.side === m.side || !s.alive || isAir(s) || s.submerged) continue;
+        if (s.side === m.side || !s.alive || isAir(s) || s.submerged || s.spec.bio) continue;
         if ((s.x - m.x) * fx + (s.z - m.z) * fz < 0) continue;
         const d = Math.hypot(s.x - m.tx, s.z - m.tz);
         if (d < bestD) {

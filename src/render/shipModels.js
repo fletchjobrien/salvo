@@ -479,6 +479,37 @@ function buildPatrol(pal, aew) {
   return { geo: b.build(), deck: 1.5, gunZ: 0, gunSize: 0.1, radarY: -1.2, radarZ: 2, stacks: [[0, 0, -L / 2]], ciws: [[0, 0, 0]], mastTop: [0, 2, 0] };
 }
 
+function buildWhale() {
+  const b = new Builder();
+  const skin = 0x2c3238;
+  const belly = 0x5d646a;
+  b.taper(3.6, 2.6, 11, 0, 0, 1.5, skin, 0.75, 0.9);
+  b.cyl(1.2, 1.8, 3.4, 0, 0.1, 8.4, skin, 7, Math.PI / 2);
+  b.box(3.0, 0.8, 9, 0, -1.2, 1.5, belly);
+  b.cyl(1.4, 0.4, 6, 0, 0.2, -6.2, skin, 7, Math.PI / 2);
+  // flukes and flippers
+  b.box(6, 0.25, 1.6, 0, 0.2, -9.6, skin, 0, 0, 0);
+  for (const s of [-1, 1]) b.box(3.4, 0.25, 1.1, s * 2.6, -0.8, 4.5, skin, s * 0.5);
+  b.box(0.3, 0.9, 1.4, 0, 1.5, -2.5, skin);
+  return { geo: b.build(), deck: 1, gunZ: 0, gunSize: 0.1, radarY: -3, radarZ: 0, stacks: [[0, 0, 0]], ciws: [[0, 0, 0]], mastTop: [0, -3, 0] };
+}
+
+function buildAirliner(pal) {
+  const b = new Builder();
+  const white = 0xd8dde0;
+  b.cyl(2.1, 2.1, 30, 0, 0, 0, white, 9, Math.PI / 2);
+  b.cyl(0.5, 2.1, 5, 0, 0.2, 17.5, white, 9, Math.PI / 2);
+  b.cyl(2.1, 0.5, 8, 0, 0.8, -19, white, 9, Math.PI / 2);
+  b.box(2.2, 0.5, 1, 0, 1.1, 18.4, pal.window || 0x223344);
+  for (const s of [-1, 1]) {
+    wing(b, 15, 6, 1.8, 6, 1.6, -0.9, 2, white, s);
+    wing(b, 5, 3, 1.2, 2.4, 0.5, 0.9, -19.5, white, s);
+    b.cyl(1.1, 1.1, 4.5, s * 6.2, -1.9, 4.6, 0x8a9096, 8, Math.PI / 2);
+  }
+  b.box(0.3, 6, 4.2, 0, 3.6, -20.5, 0x2f6fae);
+  return { geo: b.build(), deck: 2, gunZ: 0, gunSize: 0.1, radarY: -1.5, radarZ: 2, stacks: [[0, 0, -15]], ciws: [[0, 0, 0]], mastTop: [0, 2.3, 0] };
+}
+
 const cache = new Map();
 let hullMat = null;
 
@@ -512,6 +543,8 @@ export function buildShipModel(cls, side) {
       jet: () => buildJet(pal),
       mpa: () => buildPatrol(pal, false),
       aew: () => buildPatrol(pal, true),
+      whale: () => buildWhale(),
+      airliner: () => buildAirliner(pal),
       cargo: () => buildCargo(pal),
       tanker: () => buildTanker(pal),
     };
@@ -574,5 +607,7 @@ export function buildShipModel(cls, side) {
     turret.visible = false;
     port.visible = stbd.visible = !c.air;
   }
+  if (c.bio) port.visible = stbd.visible = top.visible = radar.visible = false;
+  if (cls === 'airliner') radar.visible = false;
   return { group, body, turret, barrel, radar, rotor, def };
 }

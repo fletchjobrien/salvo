@@ -34,6 +34,8 @@ export const CLASSES = {
   aew: { label: 'AEW Aircraft', short: 'AEW', len: 32, beam: 30, maxSpeed: 75, accel: 15, turnRate: 0.35, hp: 26, chaff: 0, vls: [0], noise: 0, air: true, alt: 650 },
   // civilians on the shipping lane
   cargo: { label: 'Container Ship', short: 'CIV', len: 110, beam: 16, maxSpeed: 9, accel: 0.4, turnRate: 0.05, hp: 60, chaff: 0, vls: [0], civ: true, noise: 1.3 },
+  whale: { label: 'Whale', short: 'BIO', len: 16, beam: 4, maxSpeed: 2.5, accel: 0.3, turnRate: 0.12, hp: 12, chaff: 0, vls: [0], civ: true, bio: true, noise: 0.75, sub: true },
+  airliner: { label: 'Airliner', short: 'CIV', len: 40, beam: 36, maxSpeed: 210, accel: 20, turnRate: 0.25, hp: 30, chaff: 0, vls: [0], civ: true, air: true, alt: 1150, noise: 0 },
   tanker: { label: 'Tanker', short: 'CIV', len: 128, beam: 19, maxSpeed: 8, accel: 0.35, turnRate: 0.045, hp: 75, chaff: 0, vls: [0], civ: true, noise: 1.4 },
 };
 
@@ -107,6 +109,8 @@ export const AIR_SUPPORT = {
   mpa: { name: 'Maritime Patrol', short: 'PATROL', cls: 'mpa', count: 1, duration: 100, cooldown: 140, orbit: 900, desc: 'Long-range radar and sonobuoys; torpedoes any submarine it finds.' },
   aew: { name: 'AEW Radar', short: 'AEW', cls: 'aew', count: 1, duration: 100, cooldown: 160, orbit: 1500, desc: 'Flying radar: 11 km sweep for your whole fleet.' },
 };
+// Ships this close to a coast hide in radar land clutter (half detection range).
+export const COAST_MASK = 350;
 export const AAM = { speed: 520, range: 4200, pk: 0.75, turn: 5 };
 
 // Starting formation offsets (lateral x, forward z) relative to the flagship.

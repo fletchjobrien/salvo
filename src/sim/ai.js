@@ -59,9 +59,13 @@ export class AIController {
         // Drones scout ahead toward the point.
         const drones = air.filter((a) => a.cls !== 'helo');
         if (drones.length) this.cmd({ type: 'move', ships: drones.map((a) => a.id), x: cp.x - (cx - cp.x) * 0.6, z: cp.z - (cz - cp.z) * 0.6 });
-        // Take the control point and hold it.
-        const a = Math.atan2(cx - cp.x, cz - cp.z);
-        this.cmd({ type: 'move', ships: ids, x: cp.x + Math.sin(a) * cp.r * 0.4, z: cp.z + Math.cos(a) * cp.r * 0.4 });
+        // Take the control point and hold it, tucked against the nearest
+        // island so enemy radar loses us in the land clutter.
+        const isl = w.map.islands.reduce((b, i) => (!b || Math.hypot(i.x - cp.x, i.z - cp.z) < Math.hypot(b.x - cp.x, b.z - cp.z) ? i : b), null);
+        const near = isl && Math.hypot(isl.x - cp.x, isl.z - cp.z) < cp.r + isl.rmax + 700;
+        const a = near ? Math.atan2(isl.x - cp.x, isl.z - cp.z) : Math.atan2(cx - cp.x, cz - cp.z);
+        const k = near ? 0.8 : 0.4;
+        this.cmd({ type: 'move', ships: ids, x: cp.x + Math.sin(a) * cp.r * k, z: cp.z + Math.cos(a) * cp.r * k });
         this.cmd({ type: 'speed', ships: ids, level: 3 });
       }
       return;

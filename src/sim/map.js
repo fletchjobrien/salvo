@@ -12,9 +12,55 @@ export function mulberry32(a) {
   };
 }
 
-// Distance from point to the infinite lane line.
+// Distance from a point to the shipping lane (a bent polyline).
 export function laneDistance(lane, x, z) {
-  return Math.abs((x - lane.ax) * lane.nz - (z - lane.az) * lane.nx);
+  let best = Infinity;
+  const P = lane.pts;
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[i];
+    const b = P[i + 1];
+    const vx = b.x - a.x;
+    const vz = b.z - a.z;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / (vx * vx + vz * vz || 1)));
+    best = Math.min(best, Math.hypot(a.x + vx * t - x, a.z + vz * t - z));
+  }
+  return best;
+}
+
+// The lane as waypoints for traffic going one way (dir +1: first point to
+// last), offset to the right of the centre line like a traffic separation
+// scheme.
+export function lanePath(lane, dir, off = 110) {
+  const P = dir > 0 ? lane.pts : lane.pts.slice().reverse();
+  return P.map((p, i) => {
+    const a = P[Math.max(0, i - 1)];
+    const b = P[Math.min(P.length - 1, i + 1)];
+    const L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const tx = (b.x - a.x) / L;
+    const tz = (b.z - a.z) / L;
+    return { x: p.x + tz * off, z: p.z - tx * off };
+  });
+}
+
+// Point at fraction t (0..1, by length) along a path; also the index of the
+// next vertex.
+export function pathPoint(path, t) {
+  const seg = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const L = Math.hypot(path[i + 1].x - path[i].x, path[i + 1].z - path[i].z);
+    seg.push(L);
+    total += L;
+  }
+  let d = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < seg.length; i++) {
+    if (d <= seg[i] || i === seg.length - 1) {
+      const k = Math.min(1, d / (seg[i] || 1));
+      return { x: path[i].x + (path[i + 1].x - path[i].x) * k, z: path[i].z + (path[i + 1].z - path[i].z) * k, next: i + 1 };
+    }
+    d -= seg[i];
+  }
+  return { x: path[0].x, z: path[0].z, next: 1 };
 }
 
 export function generateMap(seed = Math.floor(Math.random() * 1e9)) {
@@ -22,48 +68,83 @@ export function generateMap(seed = Math.floor(Math.random() * 1e9)) {
   const r = (a, b) => a + rnd() * (b - a);
   const half = START_DISTANCE / 2;
 
-  // Shipping lane: crosses the map side to side between the fleets.
-  const ang = r(-0.3, 0.3);
-  const off = r(-1300, 1300);
-  const dx = Math.cos(ang);
-  const dz = Math.sin(ang);
-  const L = 10500;
-  const lane = {
-    ax: -dx * L,
-    az: off - dz * L,
-    bx: dx * L,
-    bz: off + dz * L,
-    nx: dx, // unit direction
-    nz: dz,
-    width: 260,
-  };
+  // Control point: near the middle.
+  const cp = { x: r(-1600, 1600), z: r(-700, 700), r: CONTROL.radius };
 
-  // Control point: near the middle, off the lane.
-  let cp = null;
-  for (let i = 0; i < 60 && !cp; i++) {
-    const c = { x: r(-1800, 1800), z: r(-900, 900), r: CONTROL.radius };
-    if (laneDistance(lane, c.x, c.z) > c.r + 450) cp = c;
+  // Shipping lane: crosses the map side to side, alters course at a few
+  // turning points, and runs straight through the control point.
+  const flip = rnd() < 0.5 ? -1 : 1;
+  const pts = [{ x: -10500 * flip, z: r(-1500, 1500) }];
+  for (const x of [-6500, -3200]) pts.push({ x: x * flip, z: r(-1400, 1400) });
+  pts.push({ x: cp.x, z: cp.z });
+  for (const x of [3400, 6800]) pts.push({ x: x * flip + cp.x * 0.3, z: r(-1400, 1400) });
+  pts.push({ x: 10500 * flip, z: r(-1500, 1500) });
+  // keep turns gentle: no leg may bend more than ~40 degrees
+  for (let i = 1; i < pts.length - 1; i++) {
+    if (pts[i].x === cp.x && pts[i].z === cp.z) continue;
+    const a = pts[i - 1];
+    const b = pts[i + 1];
+    pts[i].z = pts[i].z * 0.6 + ((a.z + b.z) / 2) * 0.4;
   }
-  if (!cp) cp = { x: 0, z: off > 0 ? -1400 : 1400, r: CONTROL.radius };
+  const lane = { pts, width: 260 };
 
-  // Islands: in the band between the fleets, clear of spawns, lane and point.
+  // Islands. They matter: a few flank the control point so the fight there
+  // happens among them, and the rest form channels across the middle where
+  // the fleets must pass. Land masks radar and stops sea-skimmers.
   const islands = [];
-  const want = 4 + Math.floor(rnd() * 4);
-  for (let i = 0; i < 400 && islands.length < want; i++) {
-    const isl = { x: r(-6500, 6500), z: r(-half + 900, half - 900), r: r(260, 720) };
-    isl.h = isl.r * r(0.22, 0.42);
-    isl.seed = Math.floor(rnd() * 1e6);
-    shapeIsland(isl);
+  const fits = (isl) => {
     const R = isl.rmax;
-    const clear =
-      laneDistance(lane, isl.x, isl.z) > R + 380 &&
-      Math.hypot(isl.x - cp.x, isl.z - cp.z) > R + cp.r + 280 &&
-      Math.hypot(isl.x, isl.z - half) > R + 1500 &&
-      Math.hypot(isl.x, isl.z + half) > R + 1500 &&
-      islands.every((o) => Math.hypot(o.x - isl.x, o.z - isl.z) > o.rmax + R + 320);
-    if (clear) islands.push(isl);
+    return (
+      laneDistance(lane, isl.x, isl.z) > R + 330 &&
+      Math.hypot(isl.x - cp.x, isl.z - cp.z) > R + cp.r + 120 &&
+      Math.hypot(isl.x, isl.z - half) > R + 1300 &&
+      Math.hypot(isl.x, isl.z + half) > R + 1300 &&
+      islands.every((o) => Math.hypot(o.x - isl.x, o.z - isl.z) > o.rmax + R + 260)
+    );
+  };
+  const make = (x, z, rr) => {
+    const isl = { x, z, r: rr };
+    isl.h = isl.r * r(0.24, 0.45);
+    isl.seed = Math.floor(rnd() * 1e6);
+    return shapeIsland(isl);
+  };
+  // around the point
+  const nearCp = 2 + Math.floor(rnd() * 2);
+  for (let i = 0; i < 200 && islands.length < nearCp; i++) {
+    const ang = r(0, Math.PI * 2);
+    const rr = r(240, 520);
+    const d = cp.r + rr * 1.25 + r(140, 520);
+    const isl = make(cp.x + Math.cos(ang) * d, cp.z + Math.sin(ang) * d, rr);
+    if (fits(isl)) islands.push(isl);
+  }
+  // channels across the middle, mostly between the fleets
+  const want = islands.length + 3 + Math.floor(rnd() * 3);
+  for (let i = 0; i < 400 && islands.length < want; i++) {
+    const wide = i > 200;
+    const isl = make(r(wide ? -6500 : -4200, wide ? 6500 : 4200), r(-half + 700, half - 700), r(280, 760));
+    if (fits(isl)) islands.push(isl);
+  }
+  // a scatter of rocks and islets
+  for (let i = 0; i < 200 && islands.length < want + 3; i++) {
+    const isl = make(r(-6000, 6000), r(-half + 500, half - 500), r(90, 170));
+    if (fits(isl)) islands.push(isl);
   }
   return { seed, lane, cp, islands };
+}
+
+// Within `margin` of any coast? Ships close inshore hide in radar land
+// clutter.
+export function nearCoast(map, x, z, margin) {
+  for (const i of map.islands) {
+    if (!i.coast) shapeIsland(i);
+    const dx = x - i.x;
+    const dz = z - i.z;
+    const d2 = dx * dx + dz * dz;
+    const R = i.rmax + margin;
+    if (d2 > R * R) continue;
+    if (Math.sqrt(d2) < islandRadius(i, dx, dz) + margin) return true;
+  }
+  return false;
 }
 
 // An irregular coastline: the radius changes with bearing (a sum of a few

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CLASSES, AIR_SUPPORT } from '../config.js';
 import { radarRange } from '../sim/world.js';
-import { islandRadius } from '../sim/map.js';
+import { islandRadius, lanePath } from '../sim/map.js';
 
 const FRIEND = '#62d8ff';
 const HOSTILE = '#ff4d3d';
@@ -372,11 +372,13 @@ export class Overlay {
     const map = g.state.map;
     if (!map) return;
     const ctx = this.ctx;
-    const L = map.lane;
-    ctx.strokeStyle = 'rgba(155,232,155,0.16)';
+    ctx.strokeStyle = 'rgba(155,232,155,0.24)';
     ctx.lineWidth = 1;
     ctx.setLineDash([10, 14]);
-    for (const o of [-L.width / 2, L.width / 2]) this.groundLine(L.ax + L.nz * o, L.az - L.nx * o, L.bx + L.nz * o, L.bz - L.nx * o);
+    for (const dir of [1, -1]) {
+      const path = lanePath(map.lane, dir, map.lane.width / 2);
+      for (let i = 0; i < path.length - 1; i++) this.groundLine(path[i].x, path[i].z, path[i + 1].x, path[i + 1].z);
+    }
     ctx.setLineDash([]);
     const cp = g.state.cp;
     const own = cp.owner === g.side;
@@ -538,15 +540,35 @@ export class Overlay {
     const hover = g.hoverId === s.id;
     ctx.strokeStyle = s.alive ? CIVIL : 'rgba(180,180,180,0.7)';
     ctx.lineWidth = hover ? 2.2 : 1.4;
-    ctx.strokeRect(p.x - 6, p.y - 6, 12, 12);
+    this.civShape(ctx, p.x, p.y, 6, s);
     if (hover || g.rig.dist < 2600) {
       ctx.font = `14px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = CIVIL;
-      ctx.fillText(s.name.toUpperCase(), p.x, p.y - 12);
+      ctx.fillText(s.spec.bio ? 'BIOLOGIC' : s.name.toUpperCase(), p.x, p.y - 12);
       ctx.textAlign = 'left';
     }
     if ((g.fireMode || g.airMode === 'strike') && hover) this.brackets(p.x, p.y, 14, HOSTILE);
+  }
+
+  // Neutral symbols are squares (NTDS): full for surface, top half for air,
+  // bottom half for under water.
+  civShape(ctx, x, y, r, s) {
+    const kind = s.spec && s.spec.air ? 'air' : s.submerged || (s.spec && s.spec.bio) ? 'sub' : 'surface';
+    ctx.beginPath();
+    if (kind === 'surface') ctx.rect(x - r, y - r, r * 2, r * 2);
+    else if (kind === 'air') {
+      ctx.moveTo(x - r, y + r * 0.4);
+      ctx.lineTo(x - r, y - r);
+      ctx.lineTo(x + r, y - r);
+      ctx.lineTo(x + r, y + r * 0.4);
+    } else {
+      ctx.moveTo(x - r, y - r * 0.4);
+      ctx.lineTo(x - r, y + r);
+      ctx.lineTo(x + r, y + r);
+      ctx.lineTo(x + r, y - r * 0.4);
+    }
+    ctx.stroke();
   }
 
   // Screen position of a ship's symbol. When zoomed in, float it above the
@@ -775,14 +797,14 @@ export class Overlay {
         }
         ctx.fill();
       }
-      const L = map.lane;
-      const [ax, ay] = P(L.ax, L.az);
-      const [bx, by] = P(L.bx, L.bz);
       ctx.strokeStyle = 'rgba(155,232,155,0.22)';
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
+      map.lane.pts.forEach((q, i) => {
+        const [lx, ly] = P(q.x, q.z);
+        if (i) ctx.lineTo(lx, ly);
+        else ctx.moveTo(lx, ly);
+      });
       ctx.stroke();
       ctx.setLineDash([]);
       const cp = g.state.cp;
@@ -847,7 +869,7 @@ export class Overlay {
       if (s.civ) {
         ctx.strokeStyle = CIVIL;
         ctx.lineWidth = 1;
-        ctx.strokeRect(px - 2.5, py - 2.5, 5, 5);
+        this.civShape(ctx, px, py, 2.5, s);
         continue;
       }
       ctx.strokeStyle = friendly ? FRIEND : HOSTILE;
