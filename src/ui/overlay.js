@@ -73,15 +73,17 @@ export class Overlay {
     const camDist = g.rig.dist;
     const side = g.side;
 
-    // range rings for a single selected ship
-    if (g.selected.size === 1) {
-      const s = g.shipById(g.selected.values().next().value);
-      if (s && s.alive) {
-        const mr = Math.max(0, ...Object.entries(s.ammo || {}).filter(([, n]) => n > 0).map(([k]) => ({ skimmer: 4200, supersonic: 3300, cruise: 7500 })[k]));
-        if (mr) this.groundCircle(s.x, s.z, mr, 'rgba(255,190,90,0.3)', [2, 6]);
-        const gr = Math.max(0, ...s.spec.guns.map((q) => q.range));
-        if (gr) this.groundCircle(s.x, s.z, gr, 'rgba(98,216,255,0.25)', [6, 6]);
-      }
+    // Range outlines for the selection: one merged outline per kind.
+    const selShips = [...g.selected].map((id) => g.shipById(id)).filter((s) => s && s.alive && s.side === side);
+    if (selShips.length) {
+      const MR = { skimmer: 4200, supersonic: 3300, cruise: 7500, heavy: 3600, light: 2800 };
+      const circles = (fn) =>
+        selShips
+          .map((s) => ({ x: s.x, z: s.z, r: fn(s) }))
+          .filter((c) => c.r > 0);
+      this.groundUnion(circles((s) => (s.radar && !s.submerged ? radarRange(s) : 0)), 'rgba(140,255,170,0.22)');
+      this.groundUnion(circles((s) => Math.max(0, ...Object.entries(s.ammo || {}).filter(([, n]) => n > 0).map(([k]) => MR[k]))), 'rgba(255,190,90,0.26)');
+      this.groundUnion(circles((s) => Math.max(0, ...s.spec.guns.map((q) => q.range))), 'rgba(98,216,255,0.22)');
     }
 
     this.drawMapLayer(g);
@@ -93,19 +95,20 @@ export class Overlay {
       if (s.side !== side || !s.alive || !g.selected.has(s.id)) continue;
       let px = s.x;
       let pz = s.z;
-      ctx.setLineDash([5, 5]);
-      ctx.strokeStyle = 'rgba(98,216,255,0.75)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(98,216,255,0.35)';
+      ctx.lineWidth = 1;
       for (const w of s.waypoints) {
         this.groundLine(px, pz, w.x, w.z);
         px = w.x;
         pz = w.z;
       }
-      ctx.setLineDash([]);
-      if (s.waypoints.length) {
-        const w = s.waypoints[s.waypoints.length - 1];
+      for (const [i, w] of s.waypoints.entries()) {
         const p = this.project(w.x, 0, w.z);
-        if (p.ok) this.cross(p.x, p.y, 5, FRIEND);
+        if (!p.ok) continue;
+        ctx.fillStyle = i === s.waypoints.length - 1 ? 'rgba(98,216,255,0.8)' : 'rgba(98,216,255,0.45)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, i === s.waypoints.length - 1 ? 2.5 : 1.8, 0, Math.PI * 2);
+        ctx.fill();
       }
       if (s.target) {
         const t = g.shipById(s.target);
@@ -394,17 +397,13 @@ export class Overlay {
   // the selected ships.
   drawRadar(g, dt) {
     const ctx = this.ctx;
-    for (const s of g.state.ships) {
-      if (s.side !== g.side || !s.alive || !g.selected.has(s.id) || !s.radar) continue;
-      this.groundCircle(s.x, s.z, radarRange(s), 'rgba(140,255,170,0.22)', [1, 7]);
-    }
     for (const rp of this.radarPings) {
       rp.t += dt;
       const s = g.shipById(rp.id);
-      if (!s) continue;
+      if (!s || (!g.selected.has(s.id) && !rp.sonar && !rp.blind)) continue;
       const dur = rp.sonar ? 1.8 : 0.9;
       const k = Math.min(1, rp.t / dur);
-      const a = (1 - k) * (rp.blind ? 0.6 : 0.35);
+      const a = (1 - k) * (rp.blind ? 0.5 : 0.22);
       if (a <= 0.01) continue;
       ctx.lineWidth = 1.5;
       const colr = rp.sonar ? `rgba(110,200,255,${a * 1.6})` : rp.blind ? `rgba(185,140,255,${a})` : `rgba(140,255,170,${a})`;
@@ -461,12 +460,11 @@ export class Overlay {
     }
   }
 
-  // Unknown radar blips: amber pulse that rings out each time a ping
-  // refreshes it, rotating brackets, and a growing last-known circle.
+  // Unknown contacts: a small amber marker that fades as the track ages,
+  // with one quiet ring each time a ping refreshes it. Details on hover.
   drawUnknown(g, dt) {
     const ctx = this.ctx;
     const now = g.state.time;
-    const wall = performance.now() / 1000;
     for (const c of g.contacts.values()) {
       if (c.level > 0) continue;
       const s = g.shipById(c.id);
@@ -476,35 +474,35 @@ export class Overlay {
       if (!prev || prev.t !== c.t) this.blips.set(c.id, { t: c.t, pulse: 0 });
       const b = this.blips.get(c.id);
       b.pulse += dt;
-      const fade = Math.max(0.25, 1 - age / 10);
+      const fade = Math.max(0.3, 1 - age / 10);
       const hover = g.hoverId === c.id;
-      if (age > 1.5) this.groundCircle(c.x, c.z, Math.min(900, age * 14), `rgba(255,209,102,${0.25 * fade})`, [2, 5]);
       const p = this.project(c.x, 6, c.z);
       if (!p.ok) continue;
-      ctx.globalAlpha = fade;
-      // refresh pulse
-      if (b.pulse < 0.8) {
-        ctx.strokeStyle = UNKNOWN;
-        ctx.globalAlpha = fade * (1 - b.pulse / 0.8);
-        ctx.lineWidth = 1.5;
+      if (b.pulse < 1) {
+        ctx.strokeStyle = `rgba(255,209,102,${0.5 * (1 - b.pulse)})`;
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 4 + b.pulse * 30, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 3 + b.pulse * 14, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.globalAlpha = fade;
       }
-      // core blip
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = g.fireMode && hover ? HOSTILE : UNKNOWN;
+      ctx.lineWidth = hover ? 1.6 : 1.2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - 4.5);
+      ctx.lineTo(p.x + 4.5, p.y);
+      ctx.lineTo(p.x, p.y + 4.5);
+      ctx.lineTo(p.x - 4.5, p.y);
+      ctx.closePath();
+      ctx.stroke();
       ctx.fillStyle = UNKNOWN;
-      ctx.fillRect(Math.round(p.x) - 2, Math.round(p.y) - 2, 5, 5);
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(wall * 0.8 + c.id);
-      this.brackets(0, 0, hover ? 13 : 10, g.fireMode && hover ? HOSTILE : UNKNOWN);
-      ctx.restore();
-      if (hover || g.rig.dist < 3500) {
+      ctx.fillRect(Math.round(p.x) - 1, Math.round(p.y) - 1, 2, 2);
+      if (hover) {
+        if (age > 1.5) this.groundCircle(c.x, c.z, Math.min(900, age * 14), 'rgba(255,209,102,0.3)', [2, 5]);
         ctx.font = `14px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.fillStyle = UNKNOWN;
-        ctx.fillText(age > 2 ? `UNKNOWN ${Math.floor(age)}s` : 'UNKNOWN', p.x, p.y - 16);
+        ctx.fillText(age > 2 ? `UNKNOWN · ${Math.floor(age)}s` : 'UNKNOWN', p.x, p.y - 10);
         ctx.textAlign = 'left';
       }
       ctx.globalAlpha = 1;
@@ -598,6 +596,43 @@ export class Overlay {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  // Outline of the union of several ground circles: each arc is drawn only
+  // where it isn't inside another circle, so overlapping ranges merge
+  // into one blob.
+  groundUnion(circles, color) {
+    if (!circles.length) return;
+    const ctx = this.ctx;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for (let i = 0; i < circles.length; i++) {
+      const c = circles[i];
+      const N = 120;
+      let started = false;
+      for (let k = 0; k <= N; k++) {
+        const a = (k / N) * Math.PI * 2;
+        const x = c.x + Math.cos(a) * c.r;
+        const z = c.z + Math.sin(a) * c.r;
+        let inside = false;
+        for (let j = 0; j < circles.length && !inside; j++) {
+          if (j === i) continue;
+          const o = circles[j];
+          if (Math.hypot(x - o.x, z - o.z) < o.r - 0.5 || (o.r === c.r && o.x === c.x && o.z === c.z && j < i)) inside = true;
+        }
+        const p = inside ? null : this.project(x, 0, z);
+        if (!p || !p.ok) {
+          started = false;
+          continue;
+        }
+        if (!started) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+        started = true;
+      }
+    }
+    ctx.stroke();
   }
 
   cross(x, y, r, color) {
